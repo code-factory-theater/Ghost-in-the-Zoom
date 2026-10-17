@@ -3,160 +3,140 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>スマート・フェードアウター v1.0 - Ghost in the Zoom</title>
+    <title>Phase 2: Ghost Twin & Name Summon - スマート影武者システム</title>
       <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <div class="container">
+        <!-- ===== HEADER ===== -->
         <div class="header">
-            <h1>🎬 SMART FADE-OUTER v1.0</h1>
-            <p>DOC-2024-GHOST-001 | 次世代型Web会議フェードアウト支援システム</p>
-        </div>
-
-        <!-- システムステータス表示 -->
-        <div class="status-display">
-            <div class="status-line">
-                <span class="status-label">[ SYSTEM STATUS ]</span>
-                <span class="status-value" id="sysStatus">● ONLINE</span>
-            </div>
-            <div class="status-line">
-                <span class="status-label">[ ZOOM CONNECTION ]</span>
-                <span class="status-value" id="zoomStatus">Connected</span>
-            </div>
-            <div class="status-line">
-                <span class="status-label">[ PACKET LOSS SIMULATION ]</span>
-                <span class="status-value" id="packetStatus">Ready</span>
-            </div>
-            <div class="status-line">
-                <span class="status-label">[ BOSS SENSOR ]</span>
-                <span class="status-value" id="bossStatus">Monitoring...</span>
-            </div>
-            <div class="status-line">
-                <span class="status-label">[ EMERGENCY MODE ]</span>
-                <span class="status-value" id="emergencyStatus">Standby</span>
+            <h1>👻 Ghost Twin & Name Summon - Phase 2</h1>
+            <div class="header-controls">
+                <div class="status-badge">
+                    <div class="status-dot inactive" id="systemStatusDot"></div>
+                    <span id="systemStatus">Ready</span>
+                </div>
             </div>
         </div>
 
-        <!-- Excelカモフラージュ（ボス検出時） -->
-        <div class="excel-disguise" id="excelDisguise">
-            <h3 style="color: #333; margin-bottom: 10px;">Q3 売上予測_ファイナル_v7.xlsx</h3>
-            <table class="excel-grid">
-                <tr>
-                    <td class="header">A</td>
-                    <td class="header">B</td>
-                    <td class="header">C</td>
-                    <td class="header">D</td>
-                    <td class="header">E</td>
-                </tr>
-                <tr>
-                    <td class="header">Product</td>
-                    <td class="header">Q1</td>
-                    <td class="header">Q2</td>
-                    <td class="header">Q3 Est.</td>
-                    <td class="header">Growth%</td>
-                </tr>
-                <tr>
-                    <td>ProductA</td>
-                    <td class="number">1500</td>
-                    <td class="number">1850</td>
-                    <td class="formula">=B3*C3</td>
-                    <td class="number">23.3%</td>
-                </tr>
-                <tr>
-                    <td>ProductB</td>
-                    <td class="number">2200</td>
-                    <td class="number">2100</td>
-                    <td class="formula">=B4+C4</td>
-                    <td class="number">-4.5%</td>
-                </tr>
-                <tr>
-                    <td>Total</td>
-                    <td class="formula">=SUM(B3:B4)</td>
-                    <td class="formula">=SUM(C3:C4)</td>
-                    <td class="formula">=D3+D4</td>
-                    <td class="number">9.4%</td>
-                </tr>
-            </table>
-        </div>
-
-        <!-- メイン機能セクション -->
-        <div class="features-grid">
-            <!-- F-01: DeepFreeze -->
-            <div class="feature-card">
-                <h3><span class="feature-icon">❄️</span> F-01 DeepFreeze</h3>
-                <p>インテリジェント・パケットロス偽装。映像をコマ落ちさせ、知的な思索中に見えるフレームでフリーズ。30秒後に自動切断。</p>
-                <button class="btn-freeze" onclick="activateDeepFreeze()">フリーズを開始</button>
-                <div class="tooltip">ESC連打でも発動可能（要：3連打）</div>
+        <!-- ===== MAIN CONTENT ===== -->
+        <div class="main-content">
+            <!-- VIDEO SECTION -->
+            <div class="video-section">
+                <div class="video-container">
+                    <video id="video" playsinline autoplay muted></video>
+                    <canvas id="ghostCanvas"></canvas>
+                    <div class="video-overlay">
+                        <div class="ghost-indicator" id="ghostIndicator">
+                            <div class="ghost-dot"></div>
+                            <span>影武者稼働中...</span>
+                        </div>
+                        <div class="alert-overlay" id="alertOverlay">
+                            <div class="alert-text" id="alertText">🚨 CALLING!</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="video-controls">
+                    <button class="btn btn-primary" id="toggleGhost">🎭 影武者ON</button>
+                    <button class="btn" id="manualReturn">↩️ 実写復帰</button>
+                    <button class="btn" id="openSettings">⚙️ 設定</button>
+                    <button class="btn btn-danger" id="emergencyStop">🛑 緊急停止</button>
+                </div>
             </div>
 
-            <!-- F-02: PanicAudio -->
-            <div class="feature-card">
-                <h3><span class="feature-icon">🔊</span> F-02 PanicAudio</h3>
-                <p>突発的アクシデント音響生成。プリセット音源で「これはしょうがない」と思わせる状況を演出。</p>
-                <div class="preset-audio">
-                    <h4>Sound Presets:</h4>
-                    <div class="preset-list">
-                        <button class="preset-btn" onclick="playPanicAudio('doorbell')">🔔 インターホン</button>
-                        <button class="preset-btn" onclick="playPanicAudio('explosion')">💥 爆破音</button>
-                        <button class="preset-btn" onclick="playPanicAudio('kid')">👶 子ども乱入</button>
+            <!-- CONTROL PANEL -->
+            <div class="control-panel">
+                <!-- Ghost Twin Section -->
+                <div class="panel-section">
+                    <div class="panel-title">📸 影武者ループ</div>
+                    <div class="toggle-group">
+                        <span class="toggle-label">ループ稼働</span>
+                        <div class="switch" id="ghostSwitch">
+                            <div class="switch-thumb"></div>
+                        </div>
+                    </div>
+                    <div class="status-text" id="ghostStatus">
+                        ⏹ 停止中 | ループ品質: 高
+                    </div>
+                </div>
+
+                <!-- Name Summon Section -->
+                <div class="panel-section">
+                    <div class="panel-title">🎤 名指し検知</div>
+                    <div class="toggle-group">
+                        <span class="toggle-label">音声認識</span>
+                        <div class="switch" id="audioSwitch">
+                            <div class="switch-thumb"></div>
+                        </div>
+                    </div>
+                    <div class="status-text" id="audioStatus">
+                        ⏹ 停止中 | マイク: ✓
+                    </div>
+                </div>
+
+                <!-- Trigger Words Section -->
+                <div class="panel-section">
+                    <div class="panel-title">🔔 トリガーワード</div>
+                    <div class="trigger-words-list" id="triggerWordsList">
+                        <!-- Dynamically populated -->
+                    </div>
+                    <div class="input-group">
+                        <input type="text" id="newTriggerInput" placeholder="新規ワード入力...">
+                        <button class="btn" id="addTriggerBtn">+</button>
+                    </div>
+                </div>
+
+                <!-- Auto Return Section -->
+                <div class="panel-section">
+                    <div class="panel-title">⚡ 自動復帰</div>
+                    <div class="toggle-group">
+                        <span class="toggle-label">トリガーで復帰</span>
+                        <div class="switch" id="autoReturnSwitch">
+                            <div class="switch-thumb"></div>
+                        </div>
+                    </div>
+                    <div class="toggle-group">
+                        <span class="toggle-label">定型音声再生</span>
+                        <div class="switch" id="voiceLineSwitch">
+                            <div class="switch-thumb"></div>
+                        </div>
+                    </div>
+                    <div class="status-text" id="autoReturnStatus">
+                        手動復帰モード
+                    </div>
+                </div>
+
+                <!-- Performance Section -->
+                <div class="panel-section">
+                    <div class="panel-title">📊 パフォーマンス</div>
+                    <div class="status-text">
+                        FPS: <span id="fpsCounter">30</span> | 
+                        Memory: <span id="memoryCounter">0</span>MB
                     </div>
                 </div>
             </div>
-
-            <!-- F-03: WorkHard Simulator -->
-            <div class="feature-card">
-                <h3><span class="feature-icon">⌨️</span> F-03 WorkHard Sim</h3>
-                <p>猛烈労働カモフラージュ。キーボード音とため息で忙しさを演出。目線自動補正で会議に集中しているように見せる。</p>
-                <button class="btn-sim" id="workHardBtn" onclick="toggleWorkHardMode()">シミュレーション開始</button>
-                <div class="tooltip" id="workHardTip">クリックで有効化 / ESC で停止</div>
-            </div>
-
-            <!-- F-04: ボスセンサー -->
-            <div class="feature-card">
-                <h3><span class="feature-icon">👔</span> Boss Sensor</h3>
-                <p>上司が話し始めた時にExcel風UIに自動偽装。視覚的なカムフラージュで疑いを払拭。</p>
-                <button class="btn-sim" onclick="toggleBossSensor()">ボス検出モード</button>
-                <div class="tooltip">上司の音声レベルで自動トリガー</div>
-            </div>
         </div>
+    </div>
 
-        <div class="divider"></div>
-
-        <!-- ビデオプレビュー -->
-        <div style="text-align: center;">
-            <p style="font-size: 12px; color: #888; margin-bottom: 10px;">📹 LIVE VIDEO PREVIEW</p>
-            <div class="video-preview">
-                <div class="video-frame" id="videoFrame">
-                    <span>Wait for connection...</span>
-                    <div class="eye-correction"></div>
-                </div>
+    <!-- SETTINGS MODAL -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-title">⚙️ 詳細設定</div>
+            <div class="modal-body">
+                <label style="color: #aaa; font-size: 12px;">
+                    <input type="checkbox" id="debugMode" style="margin-right: 8px;">
+                    デバッグモード
+                </label>
+                <label style="color: #aaa; font-size: 12px;">
+                    <input type="checkbox" id="advancedLogging" style="margin-right: 8px;">
+                    詳細ログ出力
+                </label>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeSettings()">キャンセル</button>
+                <button class="btn btn-primary" onclick="saveSettings()">保存</button>
             </div>
         </div>
-
-        <!-- 操作パネル -->
-        <div class="button-group">
-            <button class="btn-panic" onclick="emergencyAbort()">🚨 緊急脱出</button>
-            <button class="btn-freeze" onclick="simulateConnectionLoss()">📡 接続断シミュレート</button>
-            <button class="btn-sim" onclick="generateExcuseEmail()">📧 言い訳メール自動生成</button>
-            <button class="big-red-button" onclick="activatePoof()">⚡ EMERGENCY EXIT ⚡</button>
-        </div>
-
-        <div class="note">
-            ⚠️ <strong>免責事項:</strong> 本ツールは教育・娯楽目的です。実際の会議から無断退出した場合の責任は利用者が負います。
-            上司には「ルーターとブレーカーが同時に火を吹きました」と言うことを推奨します。
-        </div>
-
-        <!-- タイマー -->
-        <div class="timer">
-            <div>救われた可処分時間（推定）</div>
-            <div class="timer-value" id="savedTime">42分18秒</div>
-            <div style="font-size: 11px; margin-top: 8px; color: #666;">
-                ℹ️ <span id="motivational">あなたは悪くない。無駄な会議を設定した相手が悪いのです。</span>
-            </div>
-        </div>
-
-        <!-- メッセージ -->
-        <div class="message" id="successMessage"></div>
     </div>
 
       <script src="js/app.js"></script>

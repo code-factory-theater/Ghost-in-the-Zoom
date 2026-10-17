@@ -1,367 +1,542 @@
-// グローバル状態
-        let isDeepFreezing = false;
-        let isWorkHardRunning = false;
-        let isBossSensorActive = false;
-        let escapeCount = 0;
-        let lastEscapeTime = 0;
-        let escapeTimeout = null;
+// ===== CONSTANTS & GLOBALS =====
+        const CONFIG = {
+            LOOP_DURATION_MS: 3000,
+            FRAME_RATE: 30,
+            CROSSFADE_DURATION_MS: 300,
+            AUDIO_SAMPLE_RATE: 16000,
+            MAX_MEMORY_MB: 50,
+        };
 
-        // 画面表示更新
-        function updateStatus(elementId, value, isActive = false) {
-            const elem = document.getElementById(elementId);
-            if (elem) {
-                elem.textContent = value;
-                if (isActive) {
-                    elem.classList.add('active');
-                } else {
-                    elem.classList.remove('active');
-                }
-            }
-        }
+        const STATE = {
+            ghostActive: false,
+            audioActive: false,
+            autoReturn: false,
+            voiceLine: false,
+            triggerWords: ['田中さん', 'たなか', 'リーダー'],
+            frameBuffer: [],
+            isLooping: false,
+            lastAlertTime: 0,
+            debugMode: false,
+        };
 
-        // メッセージ表示
-        function showMessage(text, duration = 3000) {
-            const msg = document.getElementById('successMessage');
-            msg.textContent = text;
-            msg.classList.add('show');
-            setTimeout(() => msg.classList.remove('show'), duration);
-        }
+        let mediaStream = null;
+        let video = null;
+        let canvas = null;
+        let canvasCtx = null;
+        let ghostCanvas = null;
+        let ghostCanvasCtx = null;
+        let animationFrameId = null;
+        let recognitionInstance = null;
+        let currentStreamTrack = null;
+        let loopStartIndex = 0;
+        let loopDirection = 1;
+        let frameIndex = 0;
+        let fpsCounter = 0;
+        let lastFpsTime = Date.now();
 
-        // ========== F-01: DeepFreeze ==========
-        function activateDeepFreeze() {
-            if (isDeepFreezing) return;
-            isDeepFreezing = true;
-
-            updateStatus('packetStatus', 'FREEZING...', true);
-            showMessage('📡 パケットロス偽装を開始します...');
-
-            const videoFrame = document.getElementById('videoFrame');
-            videoFrame.innerHTML = '<span style="animation: glitch; color: #ff006e;">⚠️ 接続不安定...</span>';
-            videoFrame.classList.add('glitch-effect');
-
-            // ステップ1: 音声を段階的に途切れさせる
-            playAudioEffect('static', 2000);
-
-            // ステップ2: 映像をフリーズ
-            setTimeout(() => {
-                videoFrame.innerHTML = '<span style="font-size: 48px;">😌</span><p>接続を確認中...</p>';
-                videoFrame.classList.remove('glitch-effect');
-                videoFrame.classList.add('frozen-frame');
-                updateStatus('packetStatus', 'FROZEN', true);
-                playAudioEffect('silence', 1000);
-
-                // ステップ3: 30秒後に自動切断
-                setTimeout(() => {
-                    completeDisconnection();
-                }, 3000); // デモ用に3秒に短縮
-            }, 2000);
-        }
-
-        // ========== F-02: PanicAudio ==========
-        function playPanicAudio(preset) {
-            updateStatus('emergencyStatus', 'AUDIO ALERT!', true);
-
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const now = audioContext.currentTime;
-
-            if (preset === 'doorbell') {
-                // インターホン連打音
-                for (let i = 0; i < 5; i++) {
-                    playTone(audioContext, 1000, 0.1, now + i * 0.25);
-                    playTone(audioContext, 1200, 0.1, now + i * 0.25 + 0.15);
-                }
-                // 自分の悲鳴
-                setTimeout(() => playVoiceEffect(audioContext, 'うわっ！'), 1500);
-            } else if (preset === 'explosion') {
-                // 爆破音：複雑な周波数の組み合わせ
-                playLowFreqNoise(audioContext, now, 0.5);
-                // 悲鳴を重ねる
-                setTimeout(() => playVoiceEffect(audioContext, 'うわぁああ！'), 100);
-            } else if (preset === 'kid') {
-                // 子ども乱入音
-                playVoiceEffect(audioContext, 'パパー！うんち出たー！');
-            }
-
-            setTimeout(() => {
-                updateStatus('emergencyStatus', 'Standby');
-                showMessage('🎤 音響効果を再生しました');
-            }, 2000);
-        }
-
-        function playTone(audioContext, frequency, duration, startTime) {
-            const oscillator = audioContext.createOscillator();
-            const gainNode = audioContext.createGain();
-            oscillator.connect(gainNode);
-            gainNode.connect(audioContext.destination);
-            oscillator.frequency.value = frequency;
-            gainNode.gain.setValueAtTime(0.3, startTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
-            oscillator.start(startTime);
-            oscillator.stop(startTime + duration);
-        }
-
-        function playLowFreqNoise(audioContext, startTime, duration) {
-            const bufferSize = audioContext.sampleRate * duration;
-            const buffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
-            const data = buffer.getChannelData(0);
-            for (let i = 0; i < bufferSize; i++) {
-                data[i] = Math.random() * 2 - 1;
-            }
-            const source = audioContext.createBufferSource();
-            source.buffer = buffer;
-            const gainNode = audioContext.createGain();
-            source.connect(gainNode);
-            gainNode.connect(audioContext.destination);
-            gainNode.gain.setValueAtTime(0.2, startTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
-            source.start(startTime);
-        }
-
-        function playVoiceEffect(audioContext, text) {
-            if ('speechSynthesis' in window) {
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'ja-JP';
-                utterance.pitch = 1.2;
-                utterance.rate = 1.5;
-                speechSynthesis.speak(utterance);
-            }
-        }
-
-        function playAudioEffect(type, duration) {
+        // ===== INITIALIZATION =====
+        async function initialize() {
+            console.log('[Phase 2] Initializing Ghost Twin & Name Summon...');
+            
+            video = document.getElementById('video');
+            ghostCanvas = document.getElementById('ghostCanvas');
+            
             try {
-                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                const now = audioContext.currentTime;
-                if (type === 'static') {
-                    const bufferSize = audioContext.sampleRate * duration / 1000;
-                    const buffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
-                    const data = buffer.getChannelData(0);
-                    for (let i = 0; i < bufferSize; i++) {
-                        data[i] = (Math.random() * 2 - 1) * 0.1;
-                    }
-                    const source = audioContext.createBufferSource();
-                    source.buffer = buffer;
-                    source.connect(audioContext.destination);
-                    source.start(now);
-                    source.stop(now + duration / 1000);
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+                    audio: true,
+                });
+                
+                video.srcObject = mediaStream;
+                currentStreamTrack = mediaStream.getVideoTracks()[0];
+                
+                // Setup canvas for frame capturing
+                canvas = document.createElement('canvas');
+                canvas.width = 1280;
+                canvas.height = 720;
+                canvasCtx = canvas.getContext('2d', { willReadFrequently: true });
+                
+                // Setup ghost canvas
+                ghostCanvas.width = 1280;
+                ghostCanvas.height = 720;
+                ghostCanvasCtx = ghostCanvas.getContext('2d', { willReadFrequently: true });
+                
+                setupEventListeners();
+                startFrameCapture();
+                updateStatus('Camera ready', 'active');
+                
+                console.log('[Phase 2] ✓ Initialization complete');
+            } catch (error) {
+                console.error('[Phase 2] ✗ Camera access failed:', error);
+                updateStatus('Camera access denied', 'error');
+            }
+        }
+
+        // ===== EVENT LISTENERS =====
+        function setupEventListeners() {
+            // Ghost Twin Toggle
+            document.getElementById('toggleGhost').addEventListener('click', toggleGhost);
+            document.getElementById('ghostSwitch').addEventListener('click', toggleGhost);
+            
+            // Manual Return
+            document.getElementById('manualReturn').addEventListener('click', manualReturn);
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'Space' && STATE.ghostActive) {
+                    e.preventDefault();
+                    manualReturn();
                 }
-            } catch (e) {
-                console.log('Audio context error:', e);
-            }
+            });
+            
+            // Settings
+            document.getElementById('openSettings').addEventListener('click', openSettings);
+            
+            // Emergency Stop
+            document.getElementById('emergencyStop').addEventListener('click', emergencyStop);
+            
+            // Audio Toggle
+            document.getElementById('audioSwitch').addEventListener('click', toggleAudio);
+            
+            // Auto Return Toggle
+            document.getElementById('autoReturnSwitch').addEventListener('click', toggleAutoReturn);
+            
+            // Voice Line Toggle
+            document.getElementById('voiceLineSwitch').addEventListener('click', toggleVoiceLine);
+            
+            // Trigger Word Management
+            document.getElementById('addTriggerBtn').addEventListener('click', addTriggerWord);
+            document.getElementById('newTriggerInput').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') addTriggerWord();
+            });
+            
+            updateTriggerWordsList();
         }
 
-        // ========== F-03: WorkHard Simulator ==========
-        let keyboardInterval = null;
-        let sighnInterval = null;
+        // ===== FRAME CAPTURE LOOP =====
+        function startFrameCapture() {
+            function captureFrame() {
+                if (!video.paused && video.readyState === video.HAVE_ENOUGH_DATA) {
+                    canvasCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    
+                    const imageData = canvasCtx.getImageData(0, 0, canvas.width, canvas.height);
+                    
+                    if (STATE.frameBuffer.length >= CONFIG.FRAME_RATE * (CONFIG.LOOP_DURATION_MS / 1000)) {
+                        STATE.frameBuffer.shift();
+                    }
+                    
+                    STATE.frameBuffer.push({
+                        timestamp: Date.now(),
+                        data: imageData,
+                    });
+                    
+                    // Update FPS
+                    fpsCounter++;
+                    const now = Date.now();
+                    if (now - lastFpsTime >= 1000) {
+                        document.getElementById('fpsCounter').textContent = fpsCounter;
+                        fpsCounter = 0;
+                        lastFpsTime = now;
+                    }
+                }
+                
+                animationFrameId = requestAnimationFrame(captureFrame);
+            }
+            captureFrame();
+        }
 
-        function toggleWorkHardMode() {
-            isWorkHardRunning = !isWorkHardRunning;
-            const btn = document.getElementById('workHardBtn');
-            const tip = document.getElementById('workHardTip');
-
-            if (isWorkHardRunning) {
-                btn.style.opacity = '0.6';
-                btn.style.background = 'rgba(100, 200, 100, 0.8)';
-                btn.textContent = 'シミュレーション中...';
-                tip.textContent = '稼働中: キーボード音とため息を再生';
-
-                updateStatus('emergencyStatus', 'WORK SIMULATION ACTIVE', true);
-
-                // キーボード音
-                keyboardInterval = setInterval(() => {
-                    playKeyboardSound();
-                }, Math.random() * 3000 + 1000);
-
-                // ため息
-                sighnInterval = setInterval(() => {
-                    playVoiceEffect(new (window.AudioContext || window.webkitAudioContext)(), 'ふぅ…');
-                }, Math.random() * 15000 + 8000);
-
-                showMessage('⌨️ 労働シミュレーションを開始しました');
+        // ===== GHOST TWIN CORE =====
+        function toggleGhost() {
+            STATE.ghostActive = !STATE.ghostActive;
+            const btn = document.getElementById('toggleGhost');
+            const indicator = document.getElementById('ghostIndicator');
+            
+            if (STATE.ghostActive) {
+                STATE.isLooping = true;
+                frameIndex = 0;
+                loopDirection = 1;
+                btn.textContent = '🎭 影武者OFF';
+                btn.style.background = 'linear-gradient(135deg, rgba(200, 100, 50, 0.5) 0%, rgba(200, 100, 50, 0.3) 100%)';
+                indicator.classList.add('active');
+                document.getElementById('ghostSwitch').classList.add('active');
+                updateStatus('影武者稼働中 | ループ品質: 高', 'active', 'ghost');
+                console.log('[Ghost Twin] ✓ Loop started');
+                startGhostLoop();
             } else {
-                btn.style.opacity = '1';
-                btn.style.background = 'rgba(255, 170, 0, 0.8)';
-                btn.textContent = 'シミュレーション開始';
-                tip.textContent = 'クリックで有効化 / ESC で停止';
-
-                updateStatus('emergencyStatus', 'Standby');
-                clearInterval(keyboardInterval);
-                clearInterval(sighnInterval);
-                showMessage('⌨️ シミュレーション停止');
+                STATE.isLooping = false;
+                btn.textContent = '🎭 影武者ON';
+                btn.style.background = 'linear-gradient(135deg, rgba(100, 200, 255, 0.5) 0%, rgba(167, 139, 250, 0.3) 100%)';
+                indicator.classList.remove('active');
+                document.getElementById('ghostSwitch').classList.remove('active');
+                updateStatus('⏹ 停止中 | ループ品質: 高', 'normal', 'ghost');
+                manualReturn(true);
+                console.log('[Ghost Twin] ⏹ Loop stopped');
             }
         }
 
-        function playKeyboardSound() {
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const now = audioContext.currentTime;
-            // ランダムなキーボード打鍵音を生成
-            for (let i = 0; i < Math.random() * 5 + 1; i++) {
-                playTone(audioContext, Math.random() * 2000 + 1000, 0.05, now + i * 0.08);
+        function startGhostLoop() {
+            function drawGhostFrame() {
+                if (!STATE.ghostActive) return;
+                
+                const frameCount = STATE.frameBuffer.length;
+                if (frameCount < 10) {
+                    // Not enough frames yet
+                    ghostCanvasCtx.fillStyle = '#000';
+                    ghostCanvasCtx.fillRect(0, 0, ghostCanvas.width, ghostCanvas.height);
+                    requestAnimationFrame(drawGhostFrame);
+                    return;
+                }
+                
+                // Smooth pingpong loop
+                const maxIndex = Math.min(frameCount - 1, 89);
+                let frameToRender = STATE.frameBuffer[Math.min(frameIndex, frameCount - 1)];
+                
+                if (frameToRender) {
+                    ghostCanvasCtx.putImageData(frameToRender.data, 0, 0);
+                    
+                    // Apply subtle motion blur for naturalness
+                    ghostCanvasCtx.globalAlpha = 0.05;
+                    if (frameIndex > 0) {
+                        const prevFrame = STATE.frameBuffer[Math.max(0, frameIndex - 1)];
+                        if (prevFrame) ghostCanvasCtx.putImageData(prevFrame.data, 0, 0);
+                    }
+                    ghostCanvasCtx.globalAlpha = 1.0;
+                }
+                
+                // Update frame index (pingpong)
+                frameIndex += loopDirection;
+                if (frameIndex >= maxIndex) {
+                    loopDirection = -1;
+                } else if (frameIndex <= 0) {
+                    loopDirection = 1;
+                }
+                
+                requestAnimationFrame(drawGhostFrame);
+            }
+            
+            // Replace video stream with canvas stream
+            try {
+                const canvasStream = ghostCanvas.captureStream(CONFIG.FRAME_RATE);
+                const canvasVideoTrack = canvasStream.getVideoTracks()[0];
+                
+                if (currentStreamTrack) {
+                    currentStreamTrack.stop();
+                }
+                
+                video.srcObject = canvasStream;
+                currentStreamTrack = canvasVideoTrack;
+                
+                drawGhostFrame();
+            } catch (error) {
+                console.error('[Ghost Twin] Stream replacement failed:', error);
             }
         }
 
-        // ========== Boss Sensor ==========
-        function toggleBossSensor() {
-            isBossSensorActive = !isBossSensorActive;
-            if (isBossSensorActive) {
-                updateStatus('bossStatus', 'ACTIVE', true);
-                document.getElementById('excelDisguise').classList.add('active');
-                showMessage('👔 ボスセンサー有効化。Excel風UIに偽装しました。');
+        function manualReturn(silent = false) {
+            if (!STATE.ghostActive && silent) return;
+            
+            STATE.isLooping = false;
+            
+            // Crossfade back to real stream
+            if (currentStreamTrack) {
+                currentStreamTrack.stop();
+            }
+            
+            const newVideoTrack = mediaStream.getVideoTracks()[0];
+            if (newVideoTrack) {
+                video.srcObject = new MediaStream([newVideoTrack]);
+                currentStreamTrack = newVideoTrack;
+            }
+            
+            if (!silent) {
+                console.log('[Ghost Twin] ↩️ Returned to real feed');
+            }
+        }
+
+        // ===== NAME SUMMON (AUDIO RECOGNITION) =====
+        function toggleAudio() {
+            STATE.audioActive = !STATE.audioActive;
+            
+            if (STATE.audioActive) {
+                startAudioRecognition();
+                document.getElementById('audioSwitch').classList.add('active');
+                updateStatus('🎤 リッスン中...', 'active', 'audio');
             } else {
-                updateStatus('bossStatus', 'Monitoring...');
-                document.getElementById('excelDisguise').classList.remove('active');
-                showMessage('👔 ボスセンサー解除');
+                stopAudioRecognition();
+                document.getElementById('audioSwitch').classList.remove('active');
+                updateStatus('⏹ 停止中 | マイク: ✓', 'normal', 'audio');
             }
         }
 
-        // ========== 緊急脱出機能 ==========
-        function emergencyAbort() {
-            showMessage('🚨 緊急脱出プログラムを実行...');
-            updateStatus('emergencyStatus', 'ESCAPING!', true);
-            simulateDisconnect();
+        function startAudioRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            
+            if (!SpeechRecognition) {
+                console.warn('[Name Summon] Speech Recognition not supported');
+                return;
+            }
+            
+            recognitionInstance = new SpeechRecognition();
+            recognitionInstance.continuous = true;
+            recognitionInstance.interimResults = true;
+            recognitionInstance.lang = 'ja-JP';
+            
+            recognitionInstance.onstart = () => {
+                console.log('[Name Summon] 🎤 Recognition started');
+            };
+            
+            recognitionInstance.onresult = (event) => {
+                let transcript = '';
+                
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const t = event.results[i][0].transcript;
+                    transcript += t;
+                    
+                    if (event.results[i].isFinal) {
+                        checkTriggerWords(transcript);
+                    }
+                }
+            };
+            
+            recognitionInstance.onerror = (event) => {
+                console.error('[Name Summon] Error:', event.error);
+            };
+            
+            recognitionInstance.onend = () => {
+                if (STATE.audioActive) {
+                    recognitionInstance.start();
+                }
+            };
+            
+            recognitionInstance.start();
         }
 
-        function simulateConnectionLoss() {
-            const videoFrame = document.getElementById('videoFrame');
-            videoFrame.style.filter = 'brightness(0)';
-            showMessage('📡 接続が失われました');
+        function stopAudioRecognition() {
+            if (recognitionInstance) {
+                recognitionInstance.stop();
+                recognitionInstance = null;
+            }
+        }
+
+        function checkTriggerWords(transcript) {
+            const normalizedTranscript = transcript.toLowerCase().trim();
+            
+            for (const triggerWord of STATE.triggerWords) {
+                const normalizedTrigger = triggerWord.toLowerCase();
+                if (normalizedTranscript.includes(normalizedTrigger)) {
+                    triggerDetected(triggerWord);
+                    return;
+                }
+            }
+        }
+
+        function triggerDetected(triggerWord) {
+            const now = Date.now();
+            if (now - STATE.lastAlertTime < 1000) return; // Debounce
+            STATE.lastAlertTime = now;
+            
+            console.log(`[Name Summon] 🚨 "${triggerWord}" detected!`);
+            
+            // Visual alert
+            const alertOverlay = document.getElementById('alertOverlay');
+            const alertText = document.getElementById('alertText');
+            alertText.textContent = `🚨 CALLING: ${triggerWord}が呼ばれました！`;
+            alertOverlay.classList.add('active');
+            
+            // Beep sound
+            playAlertSound();
+            
+            // Browser notification
+            if (Notification.permission === 'granted') {
+                new Notification('🚨 名指し検知', {
+                    body: `${triggerWord}さんが呼ばれています！`,
+                    badge: '👻',
+                    tag: 'name-summon',
+                });
+            }
+            
+            updateStatus(`🚨 「${triggerWord}」が検知されました！`, 'alert', 'audio');
+            
+            // Auto return if enabled
+            if (STATE.autoReturn && STATE.ghostActive) {
+                setTimeout(() => {
+                    manualReturn();
+                    if (STATE.voiceLine) {
+                        playVoiceLine();
+                    }
+                    console.log('[Name Summon] ⚡ Auto-returned to real feed');
+                }, 300);
+            }
+            
+            // Clear alert after 2 seconds
             setTimeout(() => {
-                videoFrame.style.filter = 'brightness(1)';
-                completeDisconnection();
+                alertOverlay.classList.remove('active');
             }, 2000);
         }
 
-        function completeDisconnection() {
-            isDeepFreezing = false;
-            updateStatus('packetStatus', 'Ready');
-            updateStatus('zoomStatus', '接続が切れました', true);
-
-            const videoFrame = document.getElementById('videoFrame');
-            videoFrame.classList.remove('frozen-frame', 'glitch-effect');
-            videoFrame.innerHTML = '<span style="color: #ff0000; font-size: 18px;">❌ CONNECTION LOST</span>';
-
-            // 救われた時間を更新
-            updateSavedTime();
-            showMessage('✅ 会議から脱出しました。完全なる勝利です。');
-
-            // 言い訳メール自動生成
-            setTimeout(generateExcuseEmail, 1500);
+        function playAlertSound() {
+            // Simple beep using Web Audio API
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            oscillator.frequency.value = 800;
+            oscillator.type = 'sine';
+            
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+            
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + 0.2);
         }
 
-        function simulateDisconnect() {
-            const videoFrame = document.getElementById('videoFrame');
-            videoFrame.innerHTML = '<span style="color: #ff6666; font-weight: bold;">接続中断...</span>';
-            setTimeout(() => {
-                videoFrame.innerHTML = '<span style="color: #ff0000; font-size: 18px;">❌ CONNECTION LOST</span>';
-                updateSavedTime();
-            }, 1000);
+        function playVoiceLine() {
+            // Simulate voice line using Web Speech API
+            const utterance = new SpeechSynthesisUtterance('あ、すいません、ミュートが外れなくて');
+            utterance.lang = 'ja-JP';
+            utterance.rate = 1.2;
+            utterance.pitch = 0.9;
+            utterance.volume = 0.6;
+            
+            window.speechSynthesis.speak(utterance);
+            console.log('[Voice Line] Spoke: 「あ、すいません、ミュートが外れなくて」');
         }
 
-        // ========== 言い訳メール自動生成 ==========
-        function generateExcuseEmail() {
-            const excuses = [
-                '🦅 近隣でカラスが電線に衝突したらしく、ブレーカーとルーターが同時に火を吹きました。',
-                '⚡ 落雷により自宅のWiFiルーターが完全に焼け焦げました。復旧まで時間がかかります。',
-                '🛰️ 何らかの衛星の落下による電波干渉が発生。復旧を試みていますが本日中は困難です。',
-                '👷 近隣で突然のガス工事が開始され、あらゆる通信インフラが遮断されました。',
-                '📡 ISPからの通知で、この時間帯のメンテナンスが行われるようです。申し訳ございません。'
-            ];
-
-            const excuse = excuses[Math.floor(Math.random() * excuses.length)];
-            showMessage(`📧 言い訳メール送信: "${excuse}"`);
-
-            updateStatus('zoomStatus', 'Offline - システムメンテナンス中');
+        // ===== AUTO RETURN =====
+        function toggleAutoReturn() {
+            STATE.autoReturn = !STATE.autoReturn;
+            document.getElementById('autoReturnSwitch').classList.toggle('active');
+            
+            const status = STATE.autoReturn 
+                ? 'トリガー検知で自動復帰' 
+                : '手動復帰モード';
+            
+            updateStatus(status, STATE.autoReturn ? 'active' : 'normal', 'auto-return');
+            console.log(`[Auto Return] ${STATE.autoReturn ? '✓ Enabled' : '⏹ Disabled'}`);
         }
 
-        // ========== Poof機能 ==========
-        function activatePoof() {
-            const container = document.querySelector('.container');
-            container.style.opacity = '0.5';
-            container.style.filter = 'blur(10px)';
-
-            playAudioEffect('static', 500);
-
-            setTimeout(() => {
-                // 証拠隠滅
-                clearLocalStorage();
-                showMessage('💨 POOF! システムトレース完全削除。痕跡ゼロ。');
-
-                setTimeout(() => {
-                    container.style.opacity = '1';
-                    container.style.filter = 'blur(0)';
-                    updateStatus('emergencyStatus', 'Standby');
-                }, 1000);
-            }, 500);
+        function toggleVoiceLine() {
+            STATE.voiceLine = !STATE.voiceLine;
+            document.getElementById('voiceLineSwitch').classList.toggle('active');
+            console.log(`[Voice Line] ${STATE.voiceLine ? '✓ Enabled' : '⏹ Disabled'}`);
         }
 
-        function clearLocalStorage() {
-            localStorage.clear();
-            sessionStorage.clear();
-            // Cookie削除シミュレーション
-            document.cookie.split(";").forEach(c => {
-                document.cookie = c.replace(/^ +/, "")
-                    .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+        // ===== TRIGGER WORDS MANAGEMENT =====
+        function addTriggerWord() {
+            const input = document.getElementById('newTriggerInput');
+            const word = input.value.trim();
+            
+            if (!word) return;
+            if (STATE.triggerWords.includes(word)) {
+                console.warn('Word already exists:', word);
+                return;
+            }
+            
+            STATE.triggerWords.push(word);
+            input.value = '';
+            updateTriggerWordsList();
+            console.log('[Trigger Words] Added:', word);
+        }
+
+        function removeTriggerWord(word) {
+            STATE.triggerWords = STATE.triggerWords.filter(w => w !== word);
+            updateTriggerWordsList();
+            console.log('[Trigger Words] Removed:', word);
+        }
+
+        function updateTriggerWordsList() {
+            const list = document.getElementById('triggerWordsList');
+            list.innerHTML = '';
+            
+            STATE.triggerWords.forEach(word => {
+                const item = document.createElement('div');
+                item.className = 'trigger-word-item';
+                item.innerHTML = `
+                    <span>${word}</span>
+                    <button onclick="removeTriggerWord('${word}')">✕</button>
+                `;
+                list.appendChild(item);
             });
         }
 
-        // ========== 救われた時間の計算 ==========
-        let savedMinutes = 42;
-        let savedSeconds = 18;
-
-        function updateSavedTime() {
-            savedMinutes += Math.floor(Math.random() * 30) + 15;
-            if (savedSeconds > 60) {
-                savedSeconds -= 60;
-                savedMinutes += 1;
-            }
-            document.getElementById('savedTime').textContent = `${savedMinutes}分${savedSeconds}秒`;
-
-            const motivations = [
-                'あなたは悪くない。無駄な会議を設定した相手が悪いのです。',
-                '時間は金。あなたは今、金を取り返しました。',
-                'このフリーダムを全力で楽しんでください。',
-                'ビールはあなたの英雄です。',
-                '上司よ、申し訳ない。しかし必然だ。'
-            ];
-            document.getElementById('motivational').textContent = motivations[Math.floor(Math.random() * motivations.length)];
+        // ===== EMERGENCY STOP =====
+        function emergencyStop() {
+            console.log('[Emergency] 🛑 All systems halting...');
+            
+            STATE.ghostActive = false;
+            STATE.audioActive = false;
+            STATE.autoReturn = false;
+            
+            // Reset UI
+            document.getElementById('toggleGhost').textContent = '🎭 影武者ON';
+            document.getElementById('toggleGhost').style.background = 'linear-gradient(135deg, rgba(100, 200, 255, 0.5) 0%, rgba(167, 139, 250, 0.3) 100%)';
+            document.getElementById('ghostSwitch').classList.remove('active');
+            document.getElementById('audioSwitch').classList.remove('active');
+            document.getElementById('autoReturnSwitch').classList.remove('active');
+            document.getElementById('ghostIndicator').classList.remove('active');
+            
+            // Stop all processes
+            stopAudioRecognition();
+            manualReturn(true);
+            
+            updateStatus('🛑 すべてのシステムが停止しました', 'error');
+            console.log('[Emergency] ✓ Emergency stop complete');
         }
 
-        // ========== ESC キー連打検出 ==========
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                const now = Date.now();
-                if (now - lastEscapeTime > 500) {
-                    escapeCount = 1;
+        // ===== UI UTILITIES =====
+        function updateStatus(text, type = 'normal', target = null) {
+            const statusElement = document.getElementById('systemStatus');
+            const statusDot = document.getElementById('systemStatusDot');
+            
+            if (statusElement) {
+                statusElement.textContent = text;
+            }
+            
+            if (statusDot) {
+                statusDot.className = 'status-dot';
+                if (type === 'active') {
+                    statusDot.classList.remove('inactive');
+                } else if (type === 'error') {
+                    statusDot.classList.add('inactive');
+                    statusDot.style.background = '#ff6464';
                 } else {
-                    escapeCount++;
-                }
-                lastEscapeTime = now;
-
-                clearTimeout(escapeTimeout);
-                escapeTimeout = setTimeout(() => { escapeCount = 0; }, 1000);
-
-                if (escapeCount === 3) {
-                    playPanicAudio('explosion');
-                    escapeCount = 0;
-                }
-
-                // WorkHardモードの停止
-                if (isWorkHardRunning && escapeCount === 1) {
-                    toggleWorkHardMode();
+                    statusDot.classList.add('inactive');
                 }
             }
-        });
+            
+            // Update specific status text
+            if (target === 'ghost') {
+                const ghostStatus = document.getElementById('ghostStatus');
+                if (ghostStatus) ghostStatus.textContent = text;
+            } else if (target === 'audio') {
+                const audioStatus = document.getElementById('audioStatus');
+                if (audioStatus) audioStatus.textContent = text;
+            } else if (target === 'auto-return') {
+                const autoReturnStatus = document.getElementById('autoReturnStatus');
+                if (autoReturnStatus) autoReturnStatus.textContent = text;
+            }
+        }
 
-        // ========== 初期化 ==========
-        window.addEventListener('load', () => {
-            updateStatus('sysStatus', '● ONLINE');
-            updateStatus('zoomStatus', 'Connected');
-            updateStatus('packetStatus', 'Ready');
-            updateStatus('bossStatus', 'Monitoring...');
-            updateStatus('emergencyStatus', 'Standby');
+        function openSettings() {
+            document.getElementById('settingsModal').classList.add('active');
+        }
 
-            // ビデオフレームの初期表示
-            const videoFrame = document.getElementById('videoFrame');
-            videoFrame.innerHTML = '<span style="color: #00ff9f;">📹 Connected</span>';
+        function closeSettings() {
+            document.getElementById('settingsModal').classList.remove('active');
+        }
 
-            showMessage('✅ システムを起動しました。会議の無意味さから解放される準備はいいですか？', 4000);
-        });
+        function saveSettings() {
+            STATE.debugMode = document.getElementById('debugMode').checked;
+            console.log('[Settings] Saved. Debug mode:', STATE.debugMode);
+            closeSettings();
+        }
+
+        // Request notification permission
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+
+        // ===== START =====
+        window.addEventListener('load', initialize);
+        console.log('=== Phase 2: Ghost Twin & Name Summon - Loaded ===');
