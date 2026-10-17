@@ -1,690 +1,472 @@
-// ============================================================================
-        // Ghost-in-the-Zoom Phase 3: Graceful Fadeout Orchestrator
-        // ============================================================================
-
-        // Constants & Configuration
-        const STAGES = {
-            0: { name: 'Normal', duration: 0, videoQuality: 1.0, audioQuality: 1.0 },
-            1: { name: 'Warning', videoQuality: 0.85, audioQuality: 0.9 },
-            2: { name: 'Degraded', videoQuality: 0.5, audioQuality: 0.6 },
-            3: { name: 'Critical', videoQuality: 0.2, audioQuality: 0.3 },
-            4: { name: 'Poof', videoQuality: 0.0, audioQuality: 0.0 }
-        };
-
-        // Global State
-        let state = {
-            isRunning: false,
-            currentStage: 0,
-            startTime: null,
-            totalDuration: 180,
-            targetProfile: 'SlowDeath',
-            videoQualityLevel: 1.0,
-            audioQualityLevel: 1.0,
-            frameCount: 0,
-            cpuLoad: 'Low'
-        };
-
-        // ============================================================================
-        // ORCHESTRATOR - Main Timeline Controller
-        // ============================================================================
-
-        class FadeoutOrchestrator {
-            constructor(options = {}) {
-                this.duration = options.duration || 180; // seconds
-                this.profile = options.profile || 'SlowDeath';
-                this.startTime = Date.now();
-                this.isRunning = false;
-                this.listeners = {};
-                this.animationId = null;
-                this.stageTransitions = this._buildStageTransitions();
+// ===== Audio Degrader Module =====
+        class AudioDegrader {
+            constructor(audioContext) {
+                this.audioContext = audioContext;
+                this.isActive = false;
+                this.degradationLevel = 0; // 0-1
+                this.setupNodes();
             }
 
-            _buildStageTransitions() {
-                const dur = this.duration;
-                const profile = this.profile;
+            setupNodes() {
+                // ソース（マイク入力をシミュレート）
+                this.sourceNode = this.audioContext.createOscillator();
+                this.sourceNode.frequency.value = 440;
+                
+                // 圧縮器
+                this.compressor = this.audioContext.createDynamicsCompressor();
+                this.compressor.threshold.value = -50;
+                this.compressor.knee.value = 40;
+                this.compressor.ratio.value = 12;
+                this.compressor.attack.value = 0.003;
+                this.compressor.release.value = 0.25;
 
-                if (profile === 'SlowDeath') {
-                    return {
-                        0: 0,
-                        1: dur * 0.25,
-                        2: dur * 0.50,
-                        3: dur * 0.85,
-                        4: dur
-                    };
-                } else if (profile === 'SurgeDrop') {
-                    return {
-                        0: 0,
-                        1: dur * 0.10,
-                        2: dur * 0.20,
-                        3: dur * 0.40,
-                        4: dur
-                    };
-                } else if (profile === 'GhostLoop') {
-                    return {
-                        0: 0,
-                        1: dur * 0.20,
-                        2: dur * 0.40,
-                        3: dur * 0.60,
-                        4: dur * 1.5 // Loop back before final cutoff
-                    };
-                }
+                // ロー＆ハイパスフィルタ（電話回線化）
+                this.lowPass = this.audioContext.createBiquadFilter();
+                this.lowPass.type = 'lowpass';
+                this.lowPass.frequency.value = 8000;
+
+                this.highPass = this.audioContext.createBiquadFilter();
+                this.highPass.type = 'highpass';
+                this.highPass.frequency.value = 200;
+
+                // ゲイン
+                this.masterGain = this.audioContext.createGain();
+                this.masterGain.gain.value = 0.0; // 実際のテストでは0で無音
+
+                // グラフ接続：オシレータ → 圧縮 → ハイパス → ロー → マスター → 出力
+                this.sourceNode.connect(this.compressor);
+                this.compressor.connect(this.highPass);
+                this.highPass.connect(this.lowPass);
+                this.lowPass.connect(this.masterGain);
+                // this.masterGain.connect(this.audioContext.destination);
             }
 
-            on(eventName, callback) {
-                if (!this.listeners[eventName]) {
-                    this.listeners[eventName] = [];
-                }
-                this.listeners[eventName].push(callback);
-            }
+            setDegradationLevel(level) {
+                // 0 = 清晰, 1 = 完全崩壊
+                this.degradationLevel = Math.max(0, Math.min(1, level));
 
-            emit(eventName, data) {
-                if (this.listeners[eventName]) {
-                    this.listeners[eventName].forEach(cb => cb(data));
-                }
+                // ロー周波数を低下させる
+                this.lowPass.frequency.value = 8000 - (this.degradationLevel * 7900);
+
+                // ハイゲイン圧縮
+                this.compressor.ratio.value = 12 + this.degradationLevel * 30;
             }
 
             start() {
-                this.isRunning = true;
-                this.startTime = Date.now();
-                this.emit('start', { timestamp: this.startTime });
-                this._tick();
+                if (!this.isActive) {
+                    this.sourceNode.start();
+                    this.isActive = true;
+                }
             }
 
             stop() {
-                this.isRunning = false;
-                if (this.animationId) {
-                    cancelAnimationFrame(this.animationId);
-                }
-                this.emit('stop', { timestamp: Date.now() });
-            }
-
-            abort() {
-                this.isRunning = false;
-                if (this.animationId) {
-                    cancelAnimationFrame(this.animationId);
-                }
-                this.emit('abort', { timestamp: Date.now() });
-            }
-
-            _tick() {
-                if (!this.isRunning) return;
-
-                const elapsed = (Date.now() - this.startTime) / 1000; // seconds
-                const progress = Math.min(elapsed / this.duration, 1.0);
-
-                // Determine current stage
-                let stage = 0;
-                for (let s = 4; s >= 0; s--) {
-                    if (elapsed >= this.stageTransitions[s]) {
-                        stage = s;
-                        break;
-                    }
-                }
-
-                // Calculate quality levels based on stage
-                let videoQuality = 1.0;
-                let audioQuality = 1.0;
-
-                if (stage === 1) {
-                    const stageProgress = (elapsed - this.stageTransitions[1]) / 
-                        (this.stageTransitions[2] - this.stageTransitions[1]);
-                    videoQuality = 1.0 - (0.15 * stageProgress);
-                    audioQuality = 1.0 - (0.1 * stageProgress);
-                } else if (stage === 2) {
-                    const stageProgress = (elapsed - this.stageTransitions[2]) / 
-                        (this.stageTransitions[3] - this.stageTransitions[2]);
-                    videoQuality = 0.85 - (0.65 * stageProgress);
-                    audioQuality = 0.9 - (0.6 * stageProgress);
-                } else if (stage === 3) {
-                    const stageProgress = (elapsed - this.stageTransitions[3]) / 
-                        (this.stageTransitions[4] - this.stageTransitions[3]);
-                    videoQuality = Math.max(0.2 - (0.2 * stageProgress), 0);
-                    audioQuality = Math.max(0.3 - (0.3 * stageProgress), 0);
-                } else if (stage === 4) {
-                    videoQuality = 0;
-                    audioQuality = 0;
-                } else if (stage === 0) {
-                    videoQuality = 1.0;
-                    audioQuality = 1.0;
-                }
-
-                this.emit('tick', {
-                    elapsed,
-                    progress,
-                    stage,
-                    videoQuality,
-                    audioQuality
-                });
-
-                if (stage >= 4) {
-                    this.emit('complete', { elapsed });
-                    this.isRunning = false;
-                } else {
-                    this.animationId = requestAnimationFrame(() => this._tick());
+                if (this.isActive) {
+                    this.sourceNode.stop();
+                    this.isActive = false;
                 }
             }
         }
 
-        // ============================================================================
-        // VIDEO DEGRADATION ENGINE
-        // ============================================================================
-
-        class VideoProcessor {
-            constructor(canvasElement) {
-                this.canvas = canvasElement;
-                this.ctx = canvasElement.getContext('2d');
-                this.imageData = null;
-                this.qualityLevel = 1.0;
-                this.blockSize = 1;
-                this.frame = 0;
+        // ===== Video Degrader Module =====
+        class VideoDegrader {
+            constructor(canvas) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.isActive = false;
+                this.degradationLevel = 0; // 0-1
+                this.frameSkipCounter = 0;
+                this.targetFps = 60;
+                this.frameCount = 0;
+                this.lastTime = Date.now();
             }
 
-            update(qualityLevel) {
-                this.qualityLevel = qualityLevel;
-
-                // Calculate block size based on quality (pixelation effect)
-                if (qualityLevel > 0.9) {
-                    this.blockSize = 1;
-                } else if (qualityLevel > 0.7) {
-                    this.blockSize = 2;
-                } else if (qualityLevel > 0.5) {
-                    this.blockSize = 4;
-                } else if (qualityLevel > 0.2) {
-                    this.blockSize = 8;
-                } else {
-                    this.blockSize = 16;
-                }
-            }
-
-            render() {
-                const w = this.canvas.width;
-                const h = this.canvas.height;
-
-                // Draw animated gradient background
-                const gradient = this.ctx.createLinearGradient(0, 0, w, h);
-                const hue = (this.frame * 0.5) % 360;
-                gradient.addColorStop(0, `hsl(${hue}, 70%, 50%)`);
-                gradient.addColorStop(1, `hsl(${(hue + 60) % 360}, 70%, 40%)`);
+            drawTestPattern() {
+                const { width, height } = this.canvas;
+                
+                // グラデーション背景
+                const gradient = this.ctx.createLinearGradient(0, 0, width, height);
+                gradient.addColorStop(0, '#1a1a2e');
+                gradient.addColorStop(1, '#16213e');
                 this.ctx.fillStyle = gradient;
-                this.ctx.fillRect(0, 0, w, h);
+                this.ctx.fillRect(0, 0, width, height);
 
-                // Add pixelation/block noise
-                if (this.blockSize > 1) {
-                    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
-                    for (let y = 0; y < h; y += this.blockSize * 2) {
-                        for (let x = 0; x < w; x += this.blockSize * 2) {
-                            if (Math.random() > this.qualityLevel) {
-                                this.ctx.fillRect(x, y, this.blockSize, this.blockSize);
+                // テキスト
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.font = 'bold 24px Arial';
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+                this.ctx.fillText('Calamity Conductor', width / 2, height / 2 - 30);
+
+                this.ctx.font = '14px Arial';
+                this.ctx.fillText(`Degradation: ${(this.degradationLevel * 100).toFixed(0)}%`, width / 2, height / 2 + 20);
+            }
+
+            applyGlitch() {
+                const { width, height } = this.canvas;
+                const imageData = this.ctx.getImageData(0, 0, width, height);
+                const data = imageData.data;
+
+                // RGB分離ノイズ
+                if (this.degradationLevel > 0.3) {
+                    for (let i = 0; i < data.length; i += 4) {
+                        if (Math.random() < this.degradationLevel * 0.3) {
+                            const shift = Math.floor(this.degradationLevel * 10);
+                            data[i] = Math.max(0, Math.min(255, data[i] + (Math.random() - 0.5) * shift));
+                            data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + (Math.random() - 0.5) * shift));
+                            data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + (Math.random() - 0.5) * shift));
+                        }
+                    }
+                }
+
+                // ブロックノイズ
+                if (this.degradationLevel > 0.5) {
+                    const blockSize = Math.floor(8 + this.degradationLevel * 16);
+                    for (let y = 0; y < height; y += blockSize) {
+                        for (let x = 0; x < width; x += blockSize) {
+                            if (Math.random() < this.degradationLevel * 0.4) {
+                                const index = (y * width + x) * 4;
+                                const r = data[index];
+                                const g = data[index + 1];
+                                const b = data[index + 2];
+                                for (let by = 0; by < blockSize; by++) {
+                                    for (let bx = 0; bx < blockSize; bx++) {
+                                        const bidx = ((y + by) * width + (x + bx)) * 4;
+                                        if (bidx < data.length) {
+                                            data[bidx] = r;
+                                            data[bidx + 1] = g;
+                                            data[bidx + 2] = b;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
 
-                // Draw status text
-                const stageNames = ['Normal', 'Warning', 'Degraded', 'Critical', 'Disconnected'];
-                const currentStageName = stageNames[state.currentStage] || 'Unknown';
-                
-                this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-                this.ctx.font = 'bold 20px monospace';
-                this.ctx.textAlign = 'center';
-                this.ctx.fillText(`Stage ${state.currentStage}: ${currentStageName}`, w / 2, h / 2);
+                this.ctx.putImageData(imageData, 0, 0);
+            }
 
-                this.ctx.font = '14px monospace';
-                this.ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-                this.ctx.fillText(`Quality: ${(this.qualityLevel * 100).toFixed(0)}%`, w / 2, h / 2 + 40);
+            setDegradationLevel(level) {
+                this.degradationLevel = Math.max(0, Math.min(1, level));
 
-                // Add scan lines for older CRT effect
-                if (this.qualityLevel < 0.7) {
-                    this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
-                    this.ctx.lineWidth = 1;
-                    for (let y = 0; y < h; y += 4) {
-                        this.ctx.beginPath();
-                        this.ctx.moveTo(0, y);
-                        this.ctx.lineTo(w, y);
-                        this.ctx.stroke();
+                // FPS計算
+                if (this.degradationLevel < 0.25) {
+                    this.targetFps = 30;
+                } else if (this.degradationLevel < 0.5) {
+                    this.targetFps = 15;
+                } else if (this.degradationLevel < 0.75) {
+                    this.targetFps = 8;
+                } else {
+                    this.targetFps = 3;
+                }
+            }
+
+            update() {
+                this.frameSkipCounter++;
+                const skipThreshold = Math.max(1, Math.floor(60 / this.targetFps));
+
+                if (this.frameSkipCounter >= skipThreshold) {
+                    this.frameSkipCounter = 0;
+
+                    this.drawTestPattern();
+                    this.applyGlitch();
+
+                    this.frameCount++;
+                    const now = Date.now();
+                    if (now - this.lastTime >= 1000) {
+                        // FPS更新は別途
+                        this.lastTime = now;
+                    }
+                }
+            }
+
+            getCurrentFps() {
+                return this.targetFps;
+            }
+        }
+
+        // ===== Calamity Timeline Controller =====
+        class CalamityTimeline {
+            constructor(duration = 90000) {
+                this.duration = duration; // ミリ秒
+                this.startTime = null;
+                this.isRunning = false;
+                this.currentPhase = 0;
+                this.degradationLevel = 0;
+                this.audioSpeedMultiplier = 1;
+                this.onPhaseChange = null;
+                this.onUpdate = null;
+                this.onComplete = null;
+            }
+
+            start() {
+                this.startTime = Date.now();
+                this.isRunning = true;
+            }
+
+            stop() {
+                this.isRunning = false;
+                this.startTime = null;
+            }
+
+            update() {
+                if (!this.isRunning) return;
+
+                const elapsed = Date.now() - this.startTime;
+                const progress = Math.min(elapsed / this.duration, 1);
+
+                // 段階的フェーズ判定
+                let newPhase = 0;
+                if (progress < 0.333) {
+                    newPhase = 1; // 微細ノイズ期
+                } else if (progress < 0.666) {
+                    newPhase = 2; // 本格劣化期
+                } else if (progress < 0.9) {
+                    newPhase = 3; // 臨界崩壊期
+                } else {
+                    newPhase = 4; // ゴースト着地
+                }
+
+                if (newPhase !== this.currentPhase) {
+                    this.currentPhase = newPhase;
+                    if (this.onPhaseChange) {
+                        this.onPhaseChange(newPhase);
                     }
                 }
 
-                this.frame++;
-            }
-        }
+                // 劣化レベルは進捗に応じて増加
+                this.degradationLevel = progress;
 
-        // ============================================================================
-        // AUDIO DEGRADATION ENGINE
-        // ============================================================================
+                if (this.onUpdate) {
+                    this.onUpdate({
+                        progress,
+                        phase: newPhase,
+                        elapsed,
+                        duration: this.duration
+                    });
+                }
 
-        class AudioProcessor {
-            constructor() {
-                this.audioContext = null;
-                this.qualityLevel = 1.0;
-                this.analyser = null;
-                this.dataArray = null;
-                this.initialized = false;
-            }
-
-            init() {
-                if (this.initialized) return;
-                try {
-                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    this.analyser = this.audioContext.createAnalyser();
-                    this.analyser.fftSize = 256;
-                    this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
-                    this.initialized = true;
-                } catch (e) {
-                    console.log('Audio context not available');
+                // 完了判定
+                if (progress >= 1) {
+                    this.isRunning = false;
+                    if (this.onComplete) {
+                        this.onComplete();
+                    }
                 }
             }
 
-            getFrequencyData() {
-                if (!this.analyser) return null;
-                this.analyser.getByteFrequencyData(this.dataArray);
-                return this.dataArray;
+            getProgress() {
+                if (!this.isRunning) return 0;
+                const elapsed = Date.now() - this.startTime;
+                return Math.min(elapsed / this.duration, 1);
             }
 
-            update(qualityLevel) {
-                this.qualityLevel = qualityLevel;
-                // In a real scenario, this would modify audio nodes
-            }
-
-            generatePacketDropSound() {
-                if (!this.audioContext) return;
-                
-                const now = this.audioContext.currentTime;
-                const osc = this.audioContext.createOscillator();
-                const gain = this.audioContext.createGain();
-
-                osc.connect(gain);
-                gain.connect(this.audioContext.destination);
-
-                osc.frequency.setValueAtTime(800, now);
-                osc.frequency.exponentialRampToValueAtTime(200, now + 0.05);
-                gain.gain.setValueAtTime(0.1, now);
-                gain.gain.exponentialRampToValueAtTime(0, now + 0.05);
-
-                osc.start(now);
-                osc.stop(now + 0.05);
+            getPhaseName(phase) {
+                const names = ['待機', '微細ノイズ期', '本格劣化期', '臨界崩壊期', 'ゴースト着地'];
+                return names[phase] || '不明';
             }
         }
 
-        // ============================================================================
-        // UI STATE MANAGER
-        // ============================================================================
-
-        class UIManager {
+        // ===== Main Controller =====
+        class CalamityConductor {
             constructor() {
-                this.orchestrator = null;
-                this.videoProcessor = new VideoProcessor(document.getElementById('simulationCanvas'));
-                this.audioProcessor = new AudioProcessor();
-                this.animationId = null;
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                this.audioDegrader = new AudioDegrader(this.audioContext);
+                
+                this.mainCanvas = document.getElementById('mainVideoCanvas');
+                this.previewCanvas = document.getElementById('previewCanvas');
+                
+                // リサイズ
+                const rect = this.mainCanvas.parentElement.getBoundingClientRect();
+                this.mainCanvas.width = rect.width;
+                this.mainCanvas.height = rect.height * 0.9;
+                
+                this.previewCanvas.width = 320;
+                this.previewCanvas.height = 180;
+
+                this.videoDegrader = new VideoDegrader(this.mainCanvas);
+                this.previewDegrader = new VideoDegrader(this.previewCanvas);
+
+                this.timeline = null;
+                this.isSequenceActive = false;
+
                 this.setupEventListeners();
+                this.startAnimationLoop();
             }
 
             setupEventListeners() {
-                // Duration selection
-                document.getElementById('durationSelect').addEventListener('change', (e) => {
-                    if (e.target.value === 'custom') {
-                        document.getElementById('customDurationGroup').style.display = 'block';
-                    } else {
-                        document.getElementById('customDurationGroup').style.display = 'none';
-                    }
+                // ボタン
+                document.getElementById('startCalamityBtn').addEventListener('click', () => this.startSequence());
+                document.getElementById('stopCalamityBtn').addEventListener('click', () => this.stopSequence());
+                document.getElementById('copyMessageBtn').addEventListener('click', () => this.copyMessage());
+                document.getElementById('modalCloseBtn').addEventListener('click', () => this.closeModal());
+
+                // スライダー
+                document.getElementById('durationSlider').addEventListener('input', (e) => {
+                    const value = parseInt(e.target.value);
+                    document.getElementById('durationValue').textContent = value + '秒';
                 });
 
-                // Main controls
-                document.getElementById('startBtn').addEventListener('click', () => this.startSequence());
-                document.getElementById('stopBtn').addEventListener('click', () => this.stopSequence());
-                document.getElementById('testStageBtn').addEventListener('click', () => this.testStages());
-                document.getElementById('interruptBtn').addEventListener('click', () => this.interrupt());
-                document.getElementById('resetBtn').addEventListener('click', () => this.reset());
+                document.getElementById('audioSpeedSlider').addEventListener('input', (e) => {
+                    const value = parseInt(e.target.value);
+                    const labels = ['遅延', '標準', '高速'];
+                    document.getElementById('audioSpeedValue').textContent = labels[value - 1];
+                });
 
-                // Legacy tools
-                document.getElementById('deepFreezeBtn').addEventListener('click', () => this.deepFreeze());
-                document.getElementById('panicAudioBtn').addEventListener('click', () => this.panicAudio());
-                document.getElementById('glitchVideoBtn').addEventListener('click', () => this.glitchVideo());
-                document.getElementById('makeExcuseBtn').addEventListener('click', () => this.makeExcuse());
-
-                // Keyboard shortcuts
+                // ホットキー
                 document.addEventListener('keydown', (e) => {
-                    if (e.code === 'Space' && state.isRunning) {
+                    if (e.altKey && e.key === 'd') {
                         e.preventDefault();
-                        this.interrupt();
+                        if (this.isSequenceActive) {
+                            this.stopSequence();
+                        } else {
+                            this.startSequence();
+                        }
                     }
-                    if (e.code === 'Escape') {
-                        this.reset();
+                    if (e.code === 'Space') {
+                        if (this.isSequenceActive) {
+                            e.preventDefault();
+                            this.stopSequence();
+                        }
                     }
                 });
-
-                // Canvas animation loop
-                this.animate();
-            }
-
-            getDuration() {
-                const selected = document.getElementById('durationSelect').value;
-                if (selected === 'custom') {
-                    return parseInt(document.getElementById('customDuration').value) || 120;
-                }
-                return parseInt(selected);
             }
 
             startSequence() {
-                if (state.isRunning) return;
+                if (this.isSequenceActive) return;
 
-                const duration = this.getDuration();
-                const profile = document.getElementById('profileSelect').value;
+                const durationSec = parseInt(document.getElementById('durationSlider').value);
+                const durationMs = durationSec * 1000;
 
-                state.isRunning = true;
-                state.startTime = Date.now();
-                state.totalDuration = duration;
-                state.targetProfile = profile;
-                state.currentStage = 0;
+                this.timeline = new CalamityTimeline(durationMs);
 
-                document.getElementById('startBtn').disabled = true;
-                document.getElementById('stopBtn').disabled = false;
-                document.getElementById('testStageBtn').disabled = true;
+                this.timeline.onPhaseChange = (phase) => {
+                    document.getElementById('currentPhase').innerHTML = 
+                        `<span class="phase-indicator">${this.timeline.getPhaseName(phase)}</span>`;
+                };
 
-                // Disable legacy tools
-                this.disableLegacyTools(true);
+                this.timeline.onUpdate = (data) => {
+                    document.getElementById('elapsedTime').textContent = 
+                        (data.elapsed / 1000).toFixed(1) + 's';
+                    document.getElementById('sequenceProgress').style.width = 
+                        (data.progress * 100) + '%';
+                    document.getElementById('degradationLevel').textContent = 
+                        (data.progress * 100).toFixed(0) + '%';
 
-                this.orchestrator = new FadeoutOrchestrator({
-                    duration,
-                    profile
-                });
+                    // リップシンク遅延を計算
+                    const lipSyncMs = Math.round(data.progress * 800);
+                    document.getElementById('lipSyncValue').textContent = lipSyncMs + 'ms';
 
-                this.orchestrator.on('tick', (data) => {
-                    state.currentStage = data.stage;
-                    state.videoQualityLevel = data.videoQuality;
-                    state.audioQualityLevel = data.audioQuality;
-                    this.updateUI(data);
-                });
+                    // 音声品質ステータス
+                    let audioStatus = '清晰';
+                    if (data.progress > 0.25) audioStatus = '軽微な乱れ';
+                    if (data.progress > 0.5) audioStatus = 'ロボット化';
+                    if (data.progress > 0.75) audioStatus = '引き延ばし音';
+                    document.getElementById('audioQuality').textContent = audioStatus;
 
-                this.orchestrator.on('complete', () => {
-                    this.sequenceComplete();
-                });
+                    this.videoDegrader.setDegradationLevel(data.progress);
+                    this.previewDegrader.setDegradationLevel(data.progress);
+                };
 
-                this.orchestrator.start();
-                this.showToast(`Sequence started: ${duration}s / ${profile}`, 'success');
+                this.timeline.onComplete = () => {
+                    this.handleSequenceComplete();
+                };
+
+                this.isSequenceActive = true;
+                this.timeline.start();
+
+                document.getElementById('startCalamityBtn').disabled = true;
+                document.getElementById('stopCalamityBtn').disabled = false;
+                document.getElementById('statusText').textContent = '進行中';
+                document.getElementById('statusText').style.color = '#ff9800';
+
+                this.showToast('通信崩壊シーケンス開始', 'warning');
             }
 
             stopSequence() {
-                if (!state.isRunning) return;
+                if (!this.isSequenceActive) return;
 
-                state.isRunning = false;
-                if (this.orchestrator) {
-                    this.orchestrator.abort();
-                }
+                this.timeline.stop();
+                this.isSequenceActive = false;
 
-                document.getElementById('startBtn').disabled = false;
-                document.getElementById('stopBtn').disabled = true;
-                document.getElementById('testStageBtn').disabled = false;
-                this.disableLegacyTools(false);
+                document.getElementById('startCalamityBtn').disabled = false;
+                document.getElementById('stopCalamityBtn').disabled = true;
+                document.getElementById('statusText').textContent = '待機中';
+                document.getElementById('statusText').style.color = '#4caf50';
 
-                this.showToast('Sequence aborted', 'danger');
-                this.reset();
+                document.getElementById('sequenceProgress').style.width = '0%';
+                document.getElementById('degradationLevel').textContent = '0%';
+                document.getElementById('currentPhase').innerHTML = 
+                    '<span class="phase-indicator">待機</span>';
+
+                this.showToast('シーケンス停止', 'warning');
             }
 
-            interrupt() {
-                if (!state.isRunning) return;
-                this.stopSequence();
+            handleSequenceComplete() {
+                this.isSequenceActive = false;
+
+                document.getElementById('startCalamityBtn').disabled = false;
+                document.getElementById('stopCalamityBtn').disabled = true;
+                document.getElementById('statusText').textContent = '完了';
+                document.getElementById('statusText').style.color = '#4caf50';
+
+                // フリーズ状態をシミュレート
+                this.mainCanvas.style.filter = 'grayscale(1) brightness(0.7)';
+
+                this.showToast('通信崩壊完了！', 'success');
+                this.showCompleteModal();
             }
 
-            testStages() {
-                if (state.isRunning) return;
-
-                // Quickly cycle through all stages
-                let stage = 0;
-                const interval = setInterval(() => {
-                    state.currentStage = stage;
-                    state.videoQualityLevel = [1.0, 0.85, 0.5, 0.2, 0][stage];
-                    state.audioQualityLevel = [1.0, 0.9, 0.6, 0.3, 0][stage];
-                    this.updateTestUI(stage);
-
-                    this.videoProcessor.update(state.videoQualityLevel);
-
-                    if (stage >= 4) {
-                        clearInterval(interval);
-                        setTimeout(() => this.reset(), 1000);
-                    }
-                    stage++;
-                }, 1000);
-            }
-
-            updateUI(data) {
-                const stageNames = ['Normal', 'Warning', 'Degraded', 'Critical', 'Poof'];
-                
-                // Update status
-                document.getElementById('currentStage').textContent = 
-                    `Stage ${data.stage} - ${stageNames[data.stage]}`;
-                
-                // Format time
-                const mins = Math.floor(data.elapsed / 60);
-                const secs = Math.floor(data.elapsed % 60);
-                document.getElementById('elapsedTime').textContent = 
-                    `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-
-                const remaining = Math.max(0, state.totalDuration - data.elapsed);
-                const rmins = Math.floor(remaining / 60);
-                const rsecs = Math.floor(remaining % 60);
-                document.getElementById('remainingTime').textContent = 
-                    `${String(rmins).padStart(2, '0')}:${String(rsecs).padStart(2, '0')}`;
-
-                // Video quality
-                document.getElementById('videoQuality').textContent = 
-                    `${(data.videoQuality * 100).toFixed(0)}%`;
-
-                // Progress bar
-                document.getElementById('progressFill').style.width = 
-                    `${data.progress * 100}%`;
-
-                // Stage indicators
-                const dots = document.querySelectorAll('.stage-dot');
-                dots.forEach((dot, i) => {
-                    dot.classList.remove('active', 'passed');
-                    if (i === data.stage) {
-                        dot.classList.add('active');
-                    } else if (i < data.stage) {
-                        dot.classList.add('passed');
-                    }
+            copyMessage() {
+                const message = 'すみません、Wi-Fiが限界なので一度ルーター再起動してきます';
+                navigator.clipboard.writeText(message).then(() => {
+                    this.showToast('メッセージをコピーしました', 'success');
+                }).catch(() => {
+                    this.showToast('コピーに失敗しました', 'warning');
                 });
-
-                // Update CPU load estimate
-                const cpuEstimate = Math.min(100, 20 + (data.stage * 15));
-                if (cpuEstimate < 30) {
-                    state.cpuLoad = 'Low';
-                } else if (cpuEstimate < 60) {
-                    state.cpuLoad = 'Medium';
-                } else {
-                    state.cpuLoad = 'High';
-                }
-                document.getElementById('cpuLoad').textContent = state.cpuLoad;
-
-                // Update video processor
-                this.videoProcessor.update(data.videoQuality);
-
-                // Generate occasional packet drop sound at stage 2+
-                if (data.stage >= 2 && Math.random() > 0.95) {
-                    this.audioProcessor.generatePacketDropSound();
-                }
             }
 
-            updateTestUI(stage) {
-                const stageNames = ['Normal', 'Warning', 'Degraded', 'Critical', 'Poof'];
-                document.getElementById('currentStage').textContent = 
-                    `Test: Stage ${stage} - ${stageNames[stage]}`;
-                
-                const dots = document.querySelectorAll('.stage-dot');
-                dots.forEach((dot, i) => {
-                    dot.classList.remove('active', 'passed');
-                    if (i === stage) {
-                        dot.classList.add('active');
-                    } else if (i < stage) {
-                        dot.classList.add('passed');
-                    }
-                });
-
-                const qualities = [1.0, 0.85, 0.5, 0.2, 0];
-                document.getElementById('videoQuality').textContent = 
-                    `${(qualities[stage] * 100).toFixed(0)}%`;
+            showCompleteModal() {
+                document.getElementById('completeModal').classList.add('active');
             }
 
-            sequenceComplete() {
-                state.isRunning = false;
-                document.getElementById('startBtn').disabled = false;
-                document.getElementById('stopBtn').disabled = true;
-                document.getElementById('testStageBtn').disabled = false;
-                this.disableLegacyTools(false);
-
-                this.showToast('Sequence complete! Meeting ended gracefully.', 'success');
-                
-                // Generate excuse mail
-                setTimeout(() => {
-                    this.generateExcuseMail();
-                }, 500);
+            closeModal() {
+                document.getElementById('completeModal').classList.remove('active');
+                this.mainCanvas.style.filter = '';
             }
 
-            reset() {
-                state.isRunning = false;
-                state.currentStage = 0;
-                state.videoQualityLevel = 1.0;
-                state.audioQualityLevel = 1.0;
-                state.startTime = null;
-
-                document.getElementById('currentStage').textContent = 'Stage 0 - Normal';
-                document.getElementById('elapsedTime').textContent = '00:00';
-                document.getElementById('remainingTime').textContent = '--:--';
-                document.getElementById('videoQuality').textContent = '100%';
-                document.getElementById('cpuLoad').textContent = 'Low';
-                document.getElementById('progressFill').style.width = '0%';
-
-                const dots = document.querySelectorAll('.stage-dot');
-                dots.forEach((dot, i) => {
-                    dot.classList.remove('active', 'passed');
-                    if (i === 0) dot.classList.add('active');
-                });
-
-                this.videoProcessor.update(1.0);
-                document.getElementById('startBtn').disabled = false;
-                document.getElementById('stopBtn').disabled = true;
-            }
-
-            disableLegacyTools(disabled) {
-                document.getElementById('deepFreezeBtn').disabled = disabled;
-                document.getElementById('panicAudioBtn').disabled = disabled;
-                document.getElementById('glitchVideoBtn').disabled = disabled;
-                document.getElementById('makeExcuseBtn').disabled = disabled;
-            }
-
-            deepFreeze() {
-                state.videoQualityLevel = 0.1;
-                this.videoProcessor.update(0.1);
-                this.showToast('Deep Freeze activated', 'danger');
-                setTimeout(() => {
-                    state.videoQualityLevel = 1.0;
-                    this.videoProcessor.update(1.0);
-                }, 3000);
-            }
-
-            panicAudio() {
-                this.audioProcessor.init();
-                if (this.audioProcessor.audioContext) {
-                    const now = this.audioProcessor.audioContext.currentTime;
-                    const osc = this.audioProcessor.audioContext.createOscillator();
-                    const gain = this.audioProcessor.audioContext.createGain();
-
-                    osc.connect(gain);
-                    gain.connect(this.audioProcessor.audioContext.destination);
-
-                    osc.frequency.setValueAtTime(200, now);
-                    osc.frequency.exponentialRampToValueAtTime(2000, now + 0.1);
-                    gain.gain.setValueAtTime(0.3, now);
-                    gain.gain.exponentialRampToValueAtTime(0, now + 0.15);
-
-                    osc.start(now);
-                    osc.stop(now + 0.15);
-                }
-                this.showToast('Panic audio triggered', 'danger');
-            }
-
-            glitchVideo() {
-                state.videoQualityLevel = 0.3;
-                this.videoProcessor.update(0.3);
-                this.showToast('Glitch video activated', 'danger');
-                setTimeout(() => {
-                    state.videoQualityLevel = 1.0;
-                    this.videoProcessor.update(1.0);
-                }, 2000);
-            }
-
-            makeExcuse() {
-                const excuses = [
-                    "すみません、急にルーターの調子が…",
-                    "あ、電波が…接続が切れそうです",
-                    "通信が不安定になってきました",
-                    "インターネット接続が…"
-                ];
-                const excuse = excuses[Math.floor(Math.random() * excuses.length)];
-                
-                try {
-                    navigator.clipboard.writeText(excuse);
-                    this.showToast(`Copied: "${excuse}"`, 'success');
-                } catch (e) {
-                    this.showToast('Failed to copy excuse', 'danger');
-                }
-            }
-
-            generateExcuseMail() {
-                const excuses = [
-                    "申し訳ございません。先ほどの会議中にネットワーク接続が不安定になり、途中で接続が切れてしまいました。ご迷惑をおかけして申し訳ございませんでした。",
-                    "お疲れ様です。申し訳ございませんが、本日は通信環境の問題で会議から外れてしまいました。重要な情報を見落としていないか、議事録をご確認いただけますでしょうか。",
-                    "大変失礼いたしました。自宅のルーター接続が不安定で、会議に参加できなくなってしまいました。後ほど別の形式でフォローさせていただきたく存じます。"
-                ];
-                const mail = excuses[Math.floor(Math.random() * excuses.length)];
-                
-                try {
-                    navigator.clipboard.writeText(mail);
-                    this.showToast('Excuse email drafted and copied', 'success');
-                } catch (e) {
-                    this.showToast('Email draft ready', 'success');
-                }
-            }
-
-            animate() {
-                this.videoProcessor.render();
-
-                // Update audio meter
-                if (this.audioProcessor.initialized) {
-                    const freqData = this.audioProcessor.getFrequencyData();
-                    if (freqData) {
-                        const bars = document.querySelectorAll('.meter-bar');
-                        const step = Math.floor(freqData.length / bars.length);
-                        bars.forEach((bar, i) => {
-                            const value = freqData[i * step] || 0;
-                            bar.style.height = `${(value / 255) * 100}%`;
-                        });
-                    }
-                }
-
-                this.animationId = requestAnimationFrame(() => this.animate());
-            }
-
-            showToast(message, type = 'success') {
+            showToast(message, type = 'info') {
                 const toast = document.createElement('div');
-                toast.className = `toast ${type}`;
+                toast.className = 'toast ' + type;
                 toast.textContent = message;
                 document.body.appendChild(toast);
 
                 setTimeout(() => {
-                    toast.classList.add('fadeout');
+                    toast.style.animation = 'slideInUp 0.3s ease-out reverse';
                     setTimeout(() => toast.remove(), 300);
-                }, 3000);
+                }, 2000);
+            }
+
+            startAnimationLoop() {
+                const animate = () => {
+                    if (this.timeline && this.timeline.isRunning) {
+                        this.timeline.update();
+                    }
+
+                    this.videoDegrader.update();
+                    this.previewDegrader.update();
+
+                    document.getElementById('fpsCounter').textContent = 
+                        this.videoDegrader.getCurrentFps();
+
+                    requestAnimationFrame(animate);
+                };
+                animate();
             }
         }
 
-        // ============================================================================
-        // INITIALIZATION
-        // ============================================================================
-
-        let uiManager = null;
-
+        // ===== Initialize =====
+        let conductor;
         document.addEventListener('DOMContentLoaded', () => {
-            uiManager = new UIManager();
-            console.log('Ghost-in-the-Zoom Phase 3: Graceful Fadeout Orchestrator initialized');
+            conductor = new CalamityConductor();
         });
