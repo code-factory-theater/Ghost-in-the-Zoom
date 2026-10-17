@@ -3,216 +3,138 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ghost-in-the-Zoom / Phase 3 - Graceful Fadeout Orchestrator</title>
+    <title>フェーズ4 - 通信崩壊シーケンサー Calamity Conductor</title>
       <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>👻 Ghost-in-the-Zoom / Phase 3</h1>
-            <p>Graceful Fadeout Orchestrator — 段階的自然消滅シーケンサー</p>
+    <div class="main-container">
+        <!-- メイン映像エリア -->
+        <div class="video-section">
+            <canvas id="mainVideoCanvas" class="video-canvas"></canvas>
+            <div class="video-info">
+                <div class="video-info-item">
+                    <span class="video-info-label">FPS:</span>
+                    <span id="fpsCounter">60</span>
+                </div>
+                <div class="video-info-item">
+                    <span class="video-info-label">劣化度:</span>
+                    <span id="degradationLevel">0%</span>
+                </div>
+                <div class="video-info-item">
+                    <span class="video-info-label">音声品質:</span>
+                    <span id="audioQuality">清晰</span>
+                </div>
+                <div class="video-info-item">
+                    <span class="video-info-label">状態:</span>
+                    <span id="statusText" style="color: #4caf50;">待機中</span>
+                </div>
+            </div>
         </div>
 
-        <div class="content">
-            <!-- Section 1: Quick Start -->
-            <div class="section">
-                <div class="section-title">
-                    <span class="icon">⚡</span>
-                    <span>クイックスタート</span>
+        <!-- サイドパネル -->
+        <div class="side-panel">
+            <!-- 通信崩壊シーケンサー -->
+            <div class="panel-card calamity-card">
+                <div class="card-title">
+                    <span class="card-title-icon">📉</span>
+                    <span>通信崩壊シーケンサー</span>
                 </div>
-                <div class="info-box">
-                    ワンクリックで3〜5分かけて段階的に回線障害をエスカレート。周囲に「電波不良の限界」を自然に確信させて美しくフェードアウト。
-                </div>
-                <div class="controls-grid">
-                    <div class="control-group">
-                        <label class="control-label">⏱️ 実行時間</label>
-                        <select id="durationSelect">
-                            <option value="60">1 分 (Quick Test)</option>
-                            <option value="180" selected>3 分 (Standard)</option>
-                            <option value="300">5 分 (Cinematic)</option>
-                            <option value="custom">カスタム</option>
-                        </select>
-                    </div>
-                    <div class="control-group">
-                        <label class="control-label">🎯 動作プロファイル</label>
-                        <select id="profileSelect">
-                            <option value="SlowDeath" selected>SlowDeath (徐々に悪化)</option>
-                            <option value="SurgeDrop">SurgeDrop (急激に落下)</option>
-                            <option value="GhostLoop">GhostLoop (ループ状態)</option>
-                        </select>
-                    </div>
-                </div>
-                <div id="customDurationGroup" style="display:none; margin-bottom: 15px;">
-                    <div class="control-group">
-                        <label class="control-label">カスタム時間 (秒)</label>
-                        <input type="number" id="customDuration" min="10" max="600" value="120">
-                    </div>
-                </div>
-                <div class="button-grid">
-                    <button class="btn-primary" id="startBtn">▶️ START SEQUENCE</button>
-                    <button class="btn-success" id="testStageBtn">🧪 Test Stages</button>
-                    <button class="btn-danger" id="stopBtn" disabled>⏹️ ABORT NOW</button>
-                </div>
-            </div>
 
-            <!-- Section 2: Live Preview -->
-            <div class="section">
-                <div class="section-title">
-                    <span class="icon">📹</span>
-                    <span>映像シミュレーション</span>
+                <div class="button-group">
+                    <button id="startCalamityBtn" class="btn btn-primary">
+                        <span>▶️</span>
+                        <span>崩壊開始</span>
+                    </button>
+                    <button id="stopCalamityBtn" class="btn btn-danger" disabled>
+                        <span>⏹️</span>
+                        <span>緊急停止 (Space)</span>
+                    </button>
                 </div>
-                <div class="preview-area">
-                    <canvas id="simulationCanvas" width="400" height="300"></canvas>
-                    <div class="preview-label">
-                        リアルタイムでステージの映像劣化を表示しています
-                    </div>
-                </div>
-            </div>
 
-            <!-- Section 3: Current Status -->
-            <div class="section">
-                <div class="section-title">
-                    <span class="icon">📊</span>
-                    <span>実行ステータス</span>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <span>崩壊完了時間</span>
+                        <span class="slider-value" id="durationValue">90秒</span>
+                    </div>
+                    <input id="durationSlider" type="range" min="30" max="180" step="30" value="90">
                 </div>
-                <div class="status-container">
-                    <div class="status-row">
-                        <span class="status-label">現在ステージ:</span>
-                        <span class="status-value" id="currentStage">Stage 0 - Normal</span>
+
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <span>音声劣化速度</span>
+                        <span class="slider-value" id="audioSpeedValue">標準</span>
                     </div>
-                    <div class="status-row">
-                        <span class="status-label">進行時間:</span>
-                        <span class="status-value" id="elapsedTime">00:00</span>
+                    <input id="audioSpeedSlider" type="range" min="1" max="3" step="1" value="1">
+                </div>
+
+                <div class="progress-bar">
+                    <div id="sequenceProgress" class="progress-fill"></div>
+                </div>
+
+                <div class="status-display">
+                    <div class="status-item">
+                        <span class="status-label">現フェーズ:</span>
+                        <span class="status-value" id="currentPhase">
+                            <span class="phase-indicator">待機</span>
+                        </span>
                     </div>
-                    <div class="status-row">
-                        <span class="status-label">残り時間:</span>
-                        <span class="status-value" id="remainingTime">--:--</span>
+                    <div class="status-item">
+                        <span class="status-label">経過時間:</span>
+                        <span class="status-value" id="elapsedTime">0s</span>
                     </div>
-                    <div class="status-row">
-                        <span class="status-label">映像品質:</span>
-                        <span class="status-value" id="videoQuality">100%</span>
-                    </div>
-                    <div class="status-row">
-                        <span class="status-label">CPU負荷:</span>
-                        <span class="status-value" id="cpuLoad">Low</span>
-                    </div>
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="progressFill"></div>
-                    </div>
-                    <div class="stage-indicator" id="stageIndicator">
-                        <div class="stage-dot active">0</div>
-                        <div class="stage-dot">1</div>
-                        <div class="stage-dot">2</div>
-                        <div class="stage-dot">3</div>
-                        <div class="stage-dot">4</div>
+                    <div class="status-item">
+                        <span class="status-label">リップシンクずれ:</span>
+                        <span class="status-value" id="lipSyncValue">0ms</span>
                     </div>
                 </div>
             </div>
 
-            <!-- Section 4: Stage Timeline -->
-            <div class="section">
-                <div class="section-title">
-                    <span class="icon">🎬</span>
-                    <span>ステージタイムライン</span>
+            <!-- 定型チャット文 -->
+            <div class="panel-card">
+                <div class="card-title">
+                    <span class="card-title-icon">💬</span>
+                    <span>脱出メッセージ</span>
                 </div>
-                <table class="stage-table">
-                    <thead>
-                        <tr>
-                            <th>ステージ</th>
-                            <th>時間帯</th>
-                            <th>映像</th>
-                            <th>音声</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><span class="stage-name">Stage 0: Normal</span></td>
-                            <td>0:00</td>
-                            <td>通常</td>
-                            <td>クリア</td>
-                        </tr>
-                        <tr>
-                            <td><span class="stage-name">Stage 1: Warning</span></td>
-                            <td>～1:00</td>
-                            <td>微細ノイズ＆FPS低下</td>
-                            <td>パチッ音</td>
-                        </tr>
-                        <tr>
-                            <td><span class="stage-name">Stage 2: Degraded</span></td>
-                            <td>～2:00</td>
-                            <td>ガクガク3-5fps</td>
-                            <td>ロボット化</td>
-                        </tr>
-                        <tr>
-                            <td><span class="stage-name">Stage 3: Critical</span></td>
-                            <td>～2:45</td>
-                            <td>完全静止 (Freeze)</td>
-                            <td>ディレイ継続</td>
-                        </tr>
-                        <tr>
-                            <td><span class="stage-name">Stage 4: Poof</span></td>
-                            <td>3:00</td>
-                            <td>ブラックアウト</td>
-                            <td>切断</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
 
-            <!-- Section 5: Individual Tools (Legacy) -->
-            <div class="section">
-                <div class="section-title">
-                    <span class="icon">🛠️</span>
-                    <span>レガシーツール（個別実行）</span>
+                <div class="button-group">
+                    <button id="copyMessageBtn" class="btn btn-secondary">
+                        <span>📋</span>
+                        <span>コピー（完了後）</span>
+                    </button>
                 </div>
-                <div class="info-box warning">
-                    オーケストレータが動作している場合、これらのボタンは無効になります。
-                </div>
-                <div class="button-grid">
-                    <button class="btn-secondary" id="deepFreezeBtn">❄️ Deep Freeze</button>
-                    <button class="btn-danger" id="panicAudioBtn">🔊 Panic Audio</button>
-                    <button class="btn-secondary" id="glitchVideoBtn">📟 Glitch Video</button>
-                    <button class="btn-secondary" id="makeExcuseBtn">💬 Make Excuse</button>
+
+                <div style="font-size: 12px; color: #666; background: #f5f5f5; padding: 10px; border-radius: 6px; line-height: 1.6;">
+                    「すみません、Wi-Fiが限界なので一度ルーター再起動してきます」
                 </div>
             </div>
 
-            <!-- Section 6: Audio Analysis -->
-            <div class="section">
-                <div class="section-title">
-                    <span class="icon">🎵</span>
-                    <span>オーディオレベルメーター</span>
+            <!-- プレビューモニタ -->
+            <div class="panel-card">
+                <div class="card-title">
+                    <span class="card-title-icon">👁️</span>
+                    <span>相手視点プレビュー</span>
                 </div>
-                <div class="audio-meter" id="audioMeter">
-                    <div class="meter-bar"></div>
-                    <div class="meter-bar"></div>
-                    <div class="meter-bar"></div>
-                    <div class="meter-bar"></div>
-                    <div class="meter-bar"></div>
-                    <div class="meter-bar"></div>
-                    <div class="meter-bar"></div>
-                    <div class="meter-bar"></div>
+
+                <div class="preview-monitor">
+                    <div class="preview-title">相手に見えている画像</div>
+                    <canvas id="previewCanvas" class="preview-canvas"></canvas>
                 </div>
             </div>
-
-            <!-- Section 7: Emergency Controls -->
-            <div class="section">
-                <div class="section-title">
-                    <span class="icon">🚨</span>
-                    <span>緊急制御</span>
-                </div>
-                <div class="info-box danger">
-                    シーケンス実行中に Space キーまたはクリックで即座に中止可能。ESC 連打で強制脱出。
-                </div>
-                <div class="button-grid">
-                    <button class="btn-danger" id="interruptBtn">🛑 Interrupt Now (Space)</button>
-                    <button class="btn-secondary" id="resetBtn">🔄 Reset All</button>
-                </div>
-            </div>
-
         </div>
+    </div>
 
-        <div class="footer">
-            <p>Phase 3 Graceful Fadeout Orchestrator v1.0.0 | Built with Pure JavaScript | Non-destructive architecture</p>
+    <!-- 完了モーダル -->
+    <div id="completeModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-icon">🎭</div>
+            <div class="modal-title">通信崩壊完了</div>
+            <div class="modal-message">
+                あなたの電波は限界に達しました。<br>
+                相手からの切断促しを待つか、自然に落ちるのを待ってください。
+            </div>
+            <div class="modal-buttons">
+                <button id="modalCloseBtn" class="btn btn-primary">了解</button>
+            </div>
         </div>
     </div>
 
