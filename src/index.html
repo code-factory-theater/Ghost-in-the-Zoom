@@ -3,137 +3,70 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>フェーズ4 - 通信崩壊シーケンサー Calamity Conductor</title>
+    <title>Phase 5 - Quantum Dissolve Sequencer</title>
       <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <div class="main-container">
-        <!-- メイン映像エリア -->
+    <div class="container">
+        <div class="header">
+            <h1>⚛️ Quantum Dissolve</h1>
+            <p>Phase 5 - 段階的フェードアウトシーケンサー</p>
+        </div>
+
         <div class="video-section">
-            <canvas id="mainVideoCanvas" class="video-canvas"></canvas>
-            <div class="video-info">
-                <div class="video-info-item">
-                    <span class="video-info-label">FPS:</span>
-                    <span id="fpsCounter">60</span>
-                </div>
-                <div class="video-info-item">
-                    <span class="video-info-label">劣化度:</span>
-                    <span id="degradationLevel">0%</span>
-                </div>
-                <div class="video-info-item">
-                    <span class="video-info-label">音声品質:</span>
-                    <span id="audioQuality">清晰</span>
-                </div>
-                <div class="video-info-item">
-                    <span class="video-info-label">状態:</span>
-                    <span id="statusText" style="color: #4caf50;">待機中</span>
-                </div>
+            <canvas id="canvas"></canvas>
+            <div class="progress-indicator">
+                <div class="progress-bar" id="progressBar"></div>
             </div>
+            <div class="stage-label" id="stageLabel">待機中</div>
+            <div class="time-display" id="timeDisplay">00:00</div>
+            <div class="reconnect-spinner" id="reconnectSpinner"></div>
+            <div class="reconnect-text" id="reconnectText">再接続中...</div>
+            <div class="bailout-indicator" id="bailoutIndicator">[SPACE] で復帰</div>
         </div>
 
-        <!-- サイドパネル -->
-        <div class="side-panel">
-            <!-- 通信崩壊シーケンサー -->
-            <div class="panel-card calamity-card">
-                <div class="card-title">
-                    <span class="card-title-icon">📉</span>
-                    <span>通信崩壊シーケンサー</span>
-                </div>
-
-                <div class="button-group">
-                    <button id="startCalamityBtn" class="btn btn-primary">
-                        <span>▶️</span>
-                        <span>崩壊開始</span>
-                    </button>
-                    <button id="stopCalamityBtn" class="btn btn-danger" disabled>
-                        <span>⏹️</span>
-                        <span>緊急停止 (Space)</span>
-                    </button>
-                </div>
-
-                <div class="slider-group">
-                    <div class="slider-label">
-                        <span>崩壊完了時間</span>
-                        <span class="slider-value" id="durationValue">90秒</span>
-                    </div>
-                    <input id="durationSlider" type="range" min="30" max="180" step="30" value="90">
-                </div>
-
-                <div class="slider-group">
-                    <div class="slider-label">
-                        <span>音声劣化速度</span>
-                        <span class="slider-value" id="audioSpeedValue">標準</span>
-                    </div>
-                    <input id="audioSpeedSlider" type="range" min="1" max="3" step="1" value="1">
-                </div>
-
-                <div class="progress-bar">
-                    <div id="sequenceProgress" class="progress-fill"></div>
-                </div>
-
-                <div class="status-display">
-                    <div class="status-item">
-                        <span class="status-label">現フェーズ:</span>
-                        <span class="status-value" id="currentPhase">
-                            <span class="phase-indicator">待機</span>
-                        </span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-label">経過時間:</span>
-                        <span class="status-value" id="elapsedTime">0s</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-label">リップシンクずれ:</span>
-                        <span class="status-value" id="lipSyncValue">0ms</span>
-                    </div>
+        <div class="controls">
+            <div class="control-group">
+                <label>⏱️ 脱出完了時間を選択</label>
+                <div class="slider-wrapper">
+                    <input type="range" id="timeSlider" min="180" max="900" value="300" step="30">
+                    <div class="time-value" id="timeValue">5分 00秒</div>
                 </div>
             </div>
 
-            <!-- 定型チャット文 -->
-            <div class="panel-card">
-                <div class="card-title">
-                    <span class="card-title-icon">💬</span>
-                    <span>脱出メッセージ</span>
-                </div>
-
-                <div class="button-group">
-                    <button id="copyMessageBtn" class="btn btn-secondary">
-                        <span>📋</span>
-                        <span>コピー（完了後）</span>
-                    </button>
-                </div>
-
-                <div style="font-size: 12px; color: #666; background: #f5f5f5; padding: 10px; border-radius: 6px; line-height: 1.6;">
-                    「すみません、Wi-Fiが限界なので一度ルーター再起動してきます」
+            <div class="control-group">
+                <label>⚡ クイックプリセット</label>
+                <div class="preset-buttons">
+                    <button class="preset-btn" data-time="180">3分<br>（お急ぎ）</button>
+                    <button class="preset-btn active" data-time="300">5分<br>（標準）</button>
+                    <button class="preset-btn" data-time="600">10分<br>（超自然）</button>
                 </div>
             </div>
 
-            <!-- プレビューモニタ -->
-            <div class="panel-card">
-                <div class="card-title">
-                    <span class="card-title-icon">👁️</span>
-                    <span>相手視点プレビュー</span>
-                </div>
-
-                <div class="preview-monitor">
-                    <div class="preview-title">相手に見えている画像</div>
-                    <canvas id="previewCanvas" class="preview-canvas"></canvas>
+            <div class="control-group">
+                <label>🎬 実行コントロール</label>
+                <div class="action-buttons">
+                    <button class="btn-start" id="btnStart">シーケンス開始</button>
+                    <button class="btn-abort" id="btnAbort" disabled>緊急アボート</button>
                 </div>
             </div>
-        </div>
-    </div>
 
-    <!-- 完了モーダル -->
-    <div id="completeModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-icon">🎭</div>
-            <div class="modal-title">通信崩壊完了</div>
-            <div class="modal-message">
-                あなたの電波は限界に達しました。<br>
-                相手からの切断促しを待つか、自然に落ちるのを待ってください。
+            <div class="status-display">
+                <div class="status-line"><span class="status-label">状態:</span> <span id="statusState">準備完了</span></div>
+                <div class="status-line"><span class="status-label">フェーズ:</span> <span id="statusPhase">-</span></div>
+                <div class="status-line"><span class="status-label">経過時間:</span> <span id="statusElapsed">00:00</span></div>
+                <div class="status-line"><span class="status-label">残り時間:</span> <span id="statusRemaining">-</span></div>
+                <div class="status-line"><span class="status-label">映像FPS:</span> <span id="statusFps">60</span></div>
+                <div class="status-line"><span class="status-label">彩度:</span> <span id="statusSaturation">100%</span></div>
+                <div class="status-line"><span class="status-label">音声:</span> <span id="statusAudio">通常</span></div>
             </div>
-            <div class="modal-buttons">
-                <button id="modalCloseBtn" class="btn btn-primary">了解</button>
+
+            <div class="info-box">
+                <strong>ℹ️ 使い方:</strong><br>
+                1. 脱出完了時間を選択（3分/5分/10分）<br>
+                2. 「シーケンス開始」をクリック<br>
+                3. 自動的に3段階でフェードアウト<br>
+                4. 緊急時は <strong>[SPACE]キー長押し</strong> または <strong>「緊急アボート」</strong> でリセット
             </div>
         </div>
     </div>
