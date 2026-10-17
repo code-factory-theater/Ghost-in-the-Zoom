@@ -1,542 +1,690 @@
-// ===== CONSTANTS & GLOBALS =====
-        const CONFIG = {
-            LOOP_DURATION_MS: 3000,
-            FRAME_RATE: 30,
-            CROSSFADE_DURATION_MS: 300,
-            AUDIO_SAMPLE_RATE: 16000,
-            MAX_MEMORY_MB: 50,
+// ============================================================================
+        // Ghost-in-the-Zoom Phase 3: Graceful Fadeout Orchestrator
+        // ============================================================================
+
+        // Constants & Configuration
+        const STAGES = {
+            0: { name: 'Normal', duration: 0, videoQuality: 1.0, audioQuality: 1.0 },
+            1: { name: 'Warning', videoQuality: 0.85, audioQuality: 0.9 },
+            2: { name: 'Degraded', videoQuality: 0.5, audioQuality: 0.6 },
+            3: { name: 'Critical', videoQuality: 0.2, audioQuality: 0.3 },
+            4: { name: 'Poof', videoQuality: 0.0, audioQuality: 0.0 }
         };
 
-        const STATE = {
-            ghostActive: false,
-            audioActive: false,
-            autoReturn: false,
-            voiceLine: false,
-            triggerWords: ['田中さん', 'たなか', 'リーダー'],
-            frameBuffer: [],
-            isLooping: false,
-            lastAlertTime: 0,
-            debugMode: false,
+        // Global State
+        let state = {
+            isRunning: false,
+            currentStage: 0,
+            startTime: null,
+            totalDuration: 180,
+            targetProfile: 'SlowDeath',
+            videoQualityLevel: 1.0,
+            audioQualityLevel: 1.0,
+            frameCount: 0,
+            cpuLoad: 'Low'
         };
 
-        let mediaStream = null;
-        let video = null;
-        let canvas = null;
-        let canvasCtx = null;
-        let ghostCanvas = null;
-        let ghostCanvasCtx = null;
-        let animationFrameId = null;
-        let recognitionInstance = null;
-        let currentStreamTrack = null;
-        let loopStartIndex = 0;
-        let loopDirection = 1;
-        let frameIndex = 0;
-        let fpsCounter = 0;
-        let lastFpsTime = Date.now();
+        // ============================================================================
+        // ORCHESTRATOR - Main Timeline Controller
+        // ============================================================================
 
-        // ===== INITIALIZATION =====
-        async function initialize() {
-            console.log('[Phase 2] Initializing Ghost Twin & Name Summon...');
-            
-            video = document.getElementById('video');
-            ghostCanvas = document.getElementById('ghostCanvas');
-            
-            try {
-                mediaStream = await navigator.mediaDevices.getUserMedia({
-                    video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-                    audio: true,
+        class FadeoutOrchestrator {
+            constructor(options = {}) {
+                this.duration = options.duration || 180; // seconds
+                this.profile = options.profile || 'SlowDeath';
+                this.startTime = Date.now();
+                this.isRunning = false;
+                this.listeners = {};
+                this.animationId = null;
+                this.stageTransitions = this._buildStageTransitions();
+            }
+
+            _buildStageTransitions() {
+                const dur = this.duration;
+                const profile = this.profile;
+
+                if (profile === 'SlowDeath') {
+                    return {
+                        0: 0,
+                        1: dur * 0.25,
+                        2: dur * 0.50,
+                        3: dur * 0.85,
+                        4: dur
+                    };
+                } else if (profile === 'SurgeDrop') {
+                    return {
+                        0: 0,
+                        1: dur * 0.10,
+                        2: dur * 0.20,
+                        3: dur * 0.40,
+                        4: dur
+                    };
+                } else if (profile === 'GhostLoop') {
+                    return {
+                        0: 0,
+                        1: dur * 0.20,
+                        2: dur * 0.40,
+                        3: dur * 0.60,
+                        4: dur * 1.5 // Loop back before final cutoff
+                    };
+                }
+            }
+
+            on(eventName, callback) {
+                if (!this.listeners[eventName]) {
+                    this.listeners[eventName] = [];
+                }
+                this.listeners[eventName].push(callback);
+            }
+
+            emit(eventName, data) {
+                if (this.listeners[eventName]) {
+                    this.listeners[eventName].forEach(cb => cb(data));
+                }
+            }
+
+            start() {
+                this.isRunning = true;
+                this.startTime = Date.now();
+                this.emit('start', { timestamp: this.startTime });
+                this._tick();
+            }
+
+            stop() {
+                this.isRunning = false;
+                if (this.animationId) {
+                    cancelAnimationFrame(this.animationId);
+                }
+                this.emit('stop', { timestamp: Date.now() });
+            }
+
+            abort() {
+                this.isRunning = false;
+                if (this.animationId) {
+                    cancelAnimationFrame(this.animationId);
+                }
+                this.emit('abort', { timestamp: Date.now() });
+            }
+
+            _tick() {
+                if (!this.isRunning) return;
+
+                const elapsed = (Date.now() - this.startTime) / 1000; // seconds
+                const progress = Math.min(elapsed / this.duration, 1.0);
+
+                // Determine current stage
+                let stage = 0;
+                for (let s = 4; s >= 0; s--) {
+                    if (elapsed >= this.stageTransitions[s]) {
+                        stage = s;
+                        break;
+                    }
+                }
+
+                // Calculate quality levels based on stage
+                let videoQuality = 1.0;
+                let audioQuality = 1.0;
+
+                if (stage === 1) {
+                    const stageProgress = (elapsed - this.stageTransitions[1]) / 
+                        (this.stageTransitions[2] - this.stageTransitions[1]);
+                    videoQuality = 1.0 - (0.15 * stageProgress);
+                    audioQuality = 1.0 - (0.1 * stageProgress);
+                } else if (stage === 2) {
+                    const stageProgress = (elapsed - this.stageTransitions[2]) / 
+                        (this.stageTransitions[3] - this.stageTransitions[2]);
+                    videoQuality = 0.85 - (0.65 * stageProgress);
+                    audioQuality = 0.9 - (0.6 * stageProgress);
+                } else if (stage === 3) {
+                    const stageProgress = (elapsed - this.stageTransitions[3]) / 
+                        (this.stageTransitions[4] - this.stageTransitions[3]);
+                    videoQuality = Math.max(0.2 - (0.2 * stageProgress), 0);
+                    audioQuality = Math.max(0.3 - (0.3 * stageProgress), 0);
+                } else if (stage === 4) {
+                    videoQuality = 0;
+                    audioQuality = 0;
+                } else if (stage === 0) {
+                    videoQuality = 1.0;
+                    audioQuality = 1.0;
+                }
+
+                this.emit('tick', {
+                    elapsed,
+                    progress,
+                    stage,
+                    videoQuality,
+                    audioQuality
                 });
-                
-                video.srcObject = mediaStream;
-                currentStreamTrack = mediaStream.getVideoTracks()[0];
-                
-                // Setup canvas for frame capturing
-                canvas = document.createElement('canvas');
-                canvas.width = 1280;
-                canvas.height = 720;
-                canvasCtx = canvas.getContext('2d', { willReadFrequently: true });
-                
-                // Setup ghost canvas
-                ghostCanvas.width = 1280;
-                ghostCanvas.height = 720;
-                ghostCanvasCtx = ghostCanvas.getContext('2d', { willReadFrequently: true });
-                
-                setupEventListeners();
-                startFrameCapture();
-                updateStatus('Camera ready', 'active');
-                
-                console.log('[Phase 2] ✓ Initialization complete');
-            } catch (error) {
-                console.error('[Phase 2] ✗ Camera access failed:', error);
-                updateStatus('Camera access denied', 'error');
-            }
-        }
 
-        // ===== EVENT LISTENERS =====
-        function setupEventListeners() {
-            // Ghost Twin Toggle
-            document.getElementById('toggleGhost').addEventListener('click', toggleGhost);
-            document.getElementById('ghostSwitch').addEventListener('click', toggleGhost);
-            
-            // Manual Return
-            document.getElementById('manualReturn').addEventListener('click', manualReturn);
-            document.addEventListener('keydown', (e) => {
-                if (e.code === 'Space' && STATE.ghostActive) {
-                    e.preventDefault();
-                    manualReturn();
-                }
-            });
-            
-            // Settings
-            document.getElementById('openSettings').addEventListener('click', openSettings);
-            
-            // Emergency Stop
-            document.getElementById('emergencyStop').addEventListener('click', emergencyStop);
-            
-            // Audio Toggle
-            document.getElementById('audioSwitch').addEventListener('click', toggleAudio);
-            
-            // Auto Return Toggle
-            document.getElementById('autoReturnSwitch').addEventListener('click', toggleAutoReturn);
-            
-            // Voice Line Toggle
-            document.getElementById('voiceLineSwitch').addEventListener('click', toggleVoiceLine);
-            
-            // Trigger Word Management
-            document.getElementById('addTriggerBtn').addEventListener('click', addTriggerWord);
-            document.getElementById('newTriggerInput').addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') addTriggerWord();
-            });
-            
-            updateTriggerWordsList();
-        }
-
-        // ===== FRAME CAPTURE LOOP =====
-        function startFrameCapture() {
-            function captureFrame() {
-                if (!video.paused && video.readyState === video.HAVE_ENOUGH_DATA) {
-                    canvasCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                    
-                    const imageData = canvasCtx.getImageData(0, 0, canvas.width, canvas.height);
-                    
-                    if (STATE.frameBuffer.length >= CONFIG.FRAME_RATE * (CONFIG.LOOP_DURATION_MS / 1000)) {
-                        STATE.frameBuffer.shift();
-                    }
-                    
-                    STATE.frameBuffer.push({
-                        timestamp: Date.now(),
-                        data: imageData,
-                    });
-                    
-                    // Update FPS
-                    fpsCounter++;
-                    const now = Date.now();
-                    if (now - lastFpsTime >= 1000) {
-                        document.getElementById('fpsCounter').textContent = fpsCounter;
-                        fpsCounter = 0;
-                        lastFpsTime = now;
-                    }
-                }
-                
-                animationFrameId = requestAnimationFrame(captureFrame);
-            }
-            captureFrame();
-        }
-
-        // ===== GHOST TWIN CORE =====
-        function toggleGhost() {
-            STATE.ghostActive = !STATE.ghostActive;
-            const btn = document.getElementById('toggleGhost');
-            const indicator = document.getElementById('ghostIndicator');
-            
-            if (STATE.ghostActive) {
-                STATE.isLooping = true;
-                frameIndex = 0;
-                loopDirection = 1;
-                btn.textContent = '🎭 影武者OFF';
-                btn.style.background = 'linear-gradient(135deg, rgba(200, 100, 50, 0.5) 0%, rgba(200, 100, 50, 0.3) 100%)';
-                indicator.classList.add('active');
-                document.getElementById('ghostSwitch').classList.add('active');
-                updateStatus('影武者稼働中 | ループ品質: 高', 'active', 'ghost');
-                console.log('[Ghost Twin] ✓ Loop started');
-                startGhostLoop();
-            } else {
-                STATE.isLooping = false;
-                btn.textContent = '🎭 影武者ON';
-                btn.style.background = 'linear-gradient(135deg, rgba(100, 200, 255, 0.5) 0%, rgba(167, 139, 250, 0.3) 100%)';
-                indicator.classList.remove('active');
-                document.getElementById('ghostSwitch').classList.remove('active');
-                updateStatus('⏹ 停止中 | ループ品質: 高', 'normal', 'ghost');
-                manualReturn(true);
-                console.log('[Ghost Twin] ⏹ Loop stopped');
-            }
-        }
-
-        function startGhostLoop() {
-            function drawGhostFrame() {
-                if (!STATE.ghostActive) return;
-                
-                const frameCount = STATE.frameBuffer.length;
-                if (frameCount < 10) {
-                    // Not enough frames yet
-                    ghostCanvasCtx.fillStyle = '#000';
-                    ghostCanvasCtx.fillRect(0, 0, ghostCanvas.width, ghostCanvas.height);
-                    requestAnimationFrame(drawGhostFrame);
-                    return;
-                }
-                
-                // Smooth pingpong loop
-                const maxIndex = Math.min(frameCount - 1, 89);
-                let frameToRender = STATE.frameBuffer[Math.min(frameIndex, frameCount - 1)];
-                
-                if (frameToRender) {
-                    ghostCanvasCtx.putImageData(frameToRender.data, 0, 0);
-                    
-                    // Apply subtle motion blur for naturalness
-                    ghostCanvasCtx.globalAlpha = 0.05;
-                    if (frameIndex > 0) {
-                        const prevFrame = STATE.frameBuffer[Math.max(0, frameIndex - 1)];
-                        if (prevFrame) ghostCanvasCtx.putImageData(prevFrame.data, 0, 0);
-                    }
-                    ghostCanvasCtx.globalAlpha = 1.0;
-                }
-                
-                // Update frame index (pingpong)
-                frameIndex += loopDirection;
-                if (frameIndex >= maxIndex) {
-                    loopDirection = -1;
-                } else if (frameIndex <= 0) {
-                    loopDirection = 1;
-                }
-                
-                requestAnimationFrame(drawGhostFrame);
-            }
-            
-            // Replace video stream with canvas stream
-            try {
-                const canvasStream = ghostCanvas.captureStream(CONFIG.FRAME_RATE);
-                const canvasVideoTrack = canvasStream.getVideoTracks()[0];
-                
-                if (currentStreamTrack) {
-                    currentStreamTrack.stop();
-                }
-                
-                video.srcObject = canvasStream;
-                currentStreamTrack = canvasVideoTrack;
-                
-                drawGhostFrame();
-            } catch (error) {
-                console.error('[Ghost Twin] Stream replacement failed:', error);
-            }
-        }
-
-        function manualReturn(silent = false) {
-            if (!STATE.ghostActive && silent) return;
-            
-            STATE.isLooping = false;
-            
-            // Crossfade back to real stream
-            if (currentStreamTrack) {
-                currentStreamTrack.stop();
-            }
-            
-            const newVideoTrack = mediaStream.getVideoTracks()[0];
-            if (newVideoTrack) {
-                video.srcObject = new MediaStream([newVideoTrack]);
-                currentStreamTrack = newVideoTrack;
-            }
-            
-            if (!silent) {
-                console.log('[Ghost Twin] ↩️ Returned to real feed');
-            }
-        }
-
-        // ===== NAME SUMMON (AUDIO RECOGNITION) =====
-        function toggleAudio() {
-            STATE.audioActive = !STATE.audioActive;
-            
-            if (STATE.audioActive) {
-                startAudioRecognition();
-                document.getElementById('audioSwitch').classList.add('active');
-                updateStatus('🎤 リッスン中...', 'active', 'audio');
-            } else {
-                stopAudioRecognition();
-                document.getElementById('audioSwitch').classList.remove('active');
-                updateStatus('⏹ 停止中 | マイク: ✓', 'normal', 'audio');
-            }
-        }
-
-        function startAudioRecognition() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            
-            if (!SpeechRecognition) {
-                console.warn('[Name Summon] Speech Recognition not supported');
-                return;
-            }
-            
-            recognitionInstance = new SpeechRecognition();
-            recognitionInstance.continuous = true;
-            recognitionInstance.interimResults = true;
-            recognitionInstance.lang = 'ja-JP';
-            
-            recognitionInstance.onstart = () => {
-                console.log('[Name Summon] 🎤 Recognition started');
-            };
-            
-            recognitionInstance.onresult = (event) => {
-                let transcript = '';
-                
-                for (let i = event.resultIndex; i < event.results.length; i++) {
-                    const t = event.results[i][0].transcript;
-                    transcript += t;
-                    
-                    if (event.results[i].isFinal) {
-                        checkTriggerWords(transcript);
-                    }
-                }
-            };
-            
-            recognitionInstance.onerror = (event) => {
-                console.error('[Name Summon] Error:', event.error);
-            };
-            
-            recognitionInstance.onend = () => {
-                if (STATE.audioActive) {
-                    recognitionInstance.start();
-                }
-            };
-            
-            recognitionInstance.start();
-        }
-
-        function stopAudioRecognition() {
-            if (recognitionInstance) {
-                recognitionInstance.stop();
-                recognitionInstance = null;
-            }
-        }
-
-        function checkTriggerWords(transcript) {
-            const normalizedTranscript = transcript.toLowerCase().trim();
-            
-            for (const triggerWord of STATE.triggerWords) {
-                const normalizedTrigger = triggerWord.toLowerCase();
-                if (normalizedTranscript.includes(normalizedTrigger)) {
-                    triggerDetected(triggerWord);
-                    return;
-                }
-            }
-        }
-
-        function triggerDetected(triggerWord) {
-            const now = Date.now();
-            if (now - STATE.lastAlertTime < 1000) return; // Debounce
-            STATE.lastAlertTime = now;
-            
-            console.log(`[Name Summon] 🚨 "${triggerWord}" detected!`);
-            
-            // Visual alert
-            const alertOverlay = document.getElementById('alertOverlay');
-            const alertText = document.getElementById('alertText');
-            alertText.textContent = `🚨 CALLING: ${triggerWord}が呼ばれました！`;
-            alertOverlay.classList.add('active');
-            
-            // Beep sound
-            playAlertSound();
-            
-            // Browser notification
-            if (Notification.permission === 'granted') {
-                new Notification('🚨 名指し検知', {
-                    body: `${triggerWord}さんが呼ばれています！`,
-                    badge: '👻',
-                    tag: 'name-summon',
-                });
-            }
-            
-            updateStatus(`🚨 「${triggerWord}」が検知されました！`, 'alert', 'audio');
-            
-            // Auto return if enabled
-            if (STATE.autoReturn && STATE.ghostActive) {
-                setTimeout(() => {
-                    manualReturn();
-                    if (STATE.voiceLine) {
-                        playVoiceLine();
-                    }
-                    console.log('[Name Summon] ⚡ Auto-returned to real feed');
-                }, 300);
-            }
-            
-            // Clear alert after 2 seconds
-            setTimeout(() => {
-                alertOverlay.classList.remove('active');
-            }, 2000);
-        }
-
-        function playAlertSound() {
-            // Simple beep using Web Audio API
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            
-            oscillator.frequency.value = 800;
-            oscillator.type = 'sine';
-            
-            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
-            
-            oscillator.start(audioCtx.currentTime);
-            oscillator.stop(audioCtx.currentTime + 0.2);
-        }
-
-        function playVoiceLine() {
-            // Simulate voice line using Web Speech API
-            const utterance = new SpeechSynthesisUtterance('あ、すいません、ミュートが外れなくて');
-            utterance.lang = 'ja-JP';
-            utterance.rate = 1.2;
-            utterance.pitch = 0.9;
-            utterance.volume = 0.6;
-            
-            window.speechSynthesis.speak(utterance);
-            console.log('[Voice Line] Spoke: 「あ、すいません、ミュートが外れなくて」');
-        }
-
-        // ===== AUTO RETURN =====
-        function toggleAutoReturn() {
-            STATE.autoReturn = !STATE.autoReturn;
-            document.getElementById('autoReturnSwitch').classList.toggle('active');
-            
-            const status = STATE.autoReturn 
-                ? 'トリガー検知で自動復帰' 
-                : '手動復帰モード';
-            
-            updateStatus(status, STATE.autoReturn ? 'active' : 'normal', 'auto-return');
-            console.log(`[Auto Return] ${STATE.autoReturn ? '✓ Enabled' : '⏹ Disabled'}`);
-        }
-
-        function toggleVoiceLine() {
-            STATE.voiceLine = !STATE.voiceLine;
-            document.getElementById('voiceLineSwitch').classList.toggle('active');
-            console.log(`[Voice Line] ${STATE.voiceLine ? '✓ Enabled' : '⏹ Disabled'}`);
-        }
-
-        // ===== TRIGGER WORDS MANAGEMENT =====
-        function addTriggerWord() {
-            const input = document.getElementById('newTriggerInput');
-            const word = input.value.trim();
-            
-            if (!word) return;
-            if (STATE.triggerWords.includes(word)) {
-                console.warn('Word already exists:', word);
-                return;
-            }
-            
-            STATE.triggerWords.push(word);
-            input.value = '';
-            updateTriggerWordsList();
-            console.log('[Trigger Words] Added:', word);
-        }
-
-        function removeTriggerWord(word) {
-            STATE.triggerWords = STATE.triggerWords.filter(w => w !== word);
-            updateTriggerWordsList();
-            console.log('[Trigger Words] Removed:', word);
-        }
-
-        function updateTriggerWordsList() {
-            const list = document.getElementById('triggerWordsList');
-            list.innerHTML = '';
-            
-            STATE.triggerWords.forEach(word => {
-                const item = document.createElement('div');
-                item.className = 'trigger-word-item';
-                item.innerHTML = `
-                    <span>${word}</span>
-                    <button onclick="removeTriggerWord('${word}')">✕</button>
-                `;
-                list.appendChild(item);
-            });
-        }
-
-        // ===== EMERGENCY STOP =====
-        function emergencyStop() {
-            console.log('[Emergency] 🛑 All systems halting...');
-            
-            STATE.ghostActive = false;
-            STATE.audioActive = false;
-            STATE.autoReturn = false;
-            
-            // Reset UI
-            document.getElementById('toggleGhost').textContent = '🎭 影武者ON';
-            document.getElementById('toggleGhost').style.background = 'linear-gradient(135deg, rgba(100, 200, 255, 0.5) 0%, rgba(167, 139, 250, 0.3) 100%)';
-            document.getElementById('ghostSwitch').classList.remove('active');
-            document.getElementById('audioSwitch').classList.remove('active');
-            document.getElementById('autoReturnSwitch').classList.remove('active');
-            document.getElementById('ghostIndicator').classList.remove('active');
-            
-            // Stop all processes
-            stopAudioRecognition();
-            manualReturn(true);
-            
-            updateStatus('🛑 すべてのシステムが停止しました', 'error');
-            console.log('[Emergency] ✓ Emergency stop complete');
-        }
-
-        // ===== UI UTILITIES =====
-        function updateStatus(text, type = 'normal', target = null) {
-            const statusElement = document.getElementById('systemStatus');
-            const statusDot = document.getElementById('systemStatusDot');
-            
-            if (statusElement) {
-                statusElement.textContent = text;
-            }
-            
-            if (statusDot) {
-                statusDot.className = 'status-dot';
-                if (type === 'active') {
-                    statusDot.classList.remove('inactive');
-                } else if (type === 'error') {
-                    statusDot.classList.add('inactive');
-                    statusDot.style.background = '#ff6464';
+                if (stage >= 4) {
+                    this.emit('complete', { elapsed });
+                    this.isRunning = false;
                 } else {
-                    statusDot.classList.add('inactive');
+                    this.animationId = requestAnimationFrame(() => this._tick());
                 }
             }
-            
-            // Update specific status text
-            if (target === 'ghost') {
-                const ghostStatus = document.getElementById('ghostStatus');
-                if (ghostStatus) ghostStatus.textContent = text;
-            } else if (target === 'audio') {
-                const audioStatus = document.getElementById('audioStatus');
-                if (audioStatus) audioStatus.textContent = text;
-            } else if (target === 'auto-return') {
-                const autoReturnStatus = document.getElementById('autoReturnStatus');
-                if (autoReturnStatus) autoReturnStatus.textContent = text;
+        }
+
+        // ============================================================================
+        // VIDEO DEGRADATION ENGINE
+        // ============================================================================
+
+        class VideoProcessor {
+            constructor(canvasElement) {
+                this.canvas = canvasElement;
+                this.ctx = canvasElement.getContext('2d');
+                this.imageData = null;
+                this.qualityLevel = 1.0;
+                this.blockSize = 1;
+                this.frame = 0;
+            }
+
+            update(qualityLevel) {
+                this.qualityLevel = qualityLevel;
+
+                // Calculate block size based on quality (pixelation effect)
+                if (qualityLevel > 0.9) {
+                    this.blockSize = 1;
+                } else if (qualityLevel > 0.7) {
+                    this.blockSize = 2;
+                } else if (qualityLevel > 0.5) {
+                    this.blockSize = 4;
+                } else if (qualityLevel > 0.2) {
+                    this.blockSize = 8;
+                } else {
+                    this.blockSize = 16;
+                }
+            }
+
+            render() {
+                const w = this.canvas.width;
+                const h = this.canvas.height;
+
+                // Draw animated gradient background
+                const gradient = this.ctx.createLinearGradient(0, 0, w, h);
+                const hue = (this.frame * 0.5) % 360;
+                gradient.addColorStop(0, `hsl(${hue}, 70%, 50%)`);
+                gradient.addColorStop(1, `hsl(${(hue + 60) % 360}, 70%, 40%)`);
+                this.ctx.fillStyle = gradient;
+                this.ctx.fillRect(0, 0, w, h);
+
+                // Add pixelation/block noise
+                if (this.blockSize > 1) {
+                    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+                    for (let y = 0; y < h; y += this.blockSize * 2) {
+                        for (let x = 0; x < w; x += this.blockSize * 2) {
+                            if (Math.random() > this.qualityLevel) {
+                                this.ctx.fillRect(x, y, this.blockSize, this.blockSize);
+                            }
+                        }
+                    }
+                }
+
+                // Draw status text
+                const stageNames = ['Normal', 'Warning', 'Degraded', 'Critical', 'Disconnected'];
+                const currentStageName = stageNames[state.currentStage] || 'Unknown';
+                
+                this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                this.ctx.font = 'bold 20px monospace';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText(`Stage ${state.currentStage}: ${currentStageName}`, w / 2, h / 2);
+
+                this.ctx.font = '14px monospace';
+                this.ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+                this.ctx.fillText(`Quality: ${(this.qualityLevel * 100).toFixed(0)}%`, w / 2, h / 2 + 40);
+
+                // Add scan lines for older CRT effect
+                if (this.qualityLevel < 0.7) {
+                    this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+                    this.ctx.lineWidth = 1;
+                    for (let y = 0; y < h; y += 4) {
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(0, y);
+                        this.ctx.lineTo(w, y);
+                        this.ctx.stroke();
+                    }
+                }
+
+                this.frame++;
             }
         }
 
-        function openSettings() {
-            document.getElementById('settingsModal').classList.add('active');
+        // ============================================================================
+        // AUDIO DEGRADATION ENGINE
+        // ============================================================================
+
+        class AudioProcessor {
+            constructor() {
+                this.audioContext = null;
+                this.qualityLevel = 1.0;
+                this.analyser = null;
+                this.dataArray = null;
+                this.initialized = false;
+            }
+
+            init() {
+                if (this.initialized) return;
+                try {
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    this.analyser = this.audioContext.createAnalyser();
+                    this.analyser.fftSize = 256;
+                    this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+                    this.initialized = true;
+                } catch (e) {
+                    console.log('Audio context not available');
+                }
+            }
+
+            getFrequencyData() {
+                if (!this.analyser) return null;
+                this.analyser.getByteFrequencyData(this.dataArray);
+                return this.dataArray;
+            }
+
+            update(qualityLevel) {
+                this.qualityLevel = qualityLevel;
+                // In a real scenario, this would modify audio nodes
+            }
+
+            generatePacketDropSound() {
+                if (!this.audioContext) return;
+                
+                const now = this.audioContext.currentTime;
+                const osc = this.audioContext.createOscillator();
+                const gain = this.audioContext.createGain();
+
+                osc.connect(gain);
+                gain.connect(this.audioContext.destination);
+
+                osc.frequency.setValueAtTime(800, now);
+                osc.frequency.exponentialRampToValueAtTime(200, now + 0.05);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0, now + 0.05);
+
+                osc.start(now);
+                osc.stop(now + 0.05);
+            }
         }
 
-        function closeSettings() {
-            document.getElementById('settingsModal').classList.remove('active');
+        // ============================================================================
+        // UI STATE MANAGER
+        // ============================================================================
+
+        class UIManager {
+            constructor() {
+                this.orchestrator = null;
+                this.videoProcessor = new VideoProcessor(document.getElementById('simulationCanvas'));
+                this.audioProcessor = new AudioProcessor();
+                this.animationId = null;
+                this.setupEventListeners();
+            }
+
+            setupEventListeners() {
+                // Duration selection
+                document.getElementById('durationSelect').addEventListener('change', (e) => {
+                    if (e.target.value === 'custom') {
+                        document.getElementById('customDurationGroup').style.display = 'block';
+                    } else {
+                        document.getElementById('customDurationGroup').style.display = 'none';
+                    }
+                });
+
+                // Main controls
+                document.getElementById('startBtn').addEventListener('click', () => this.startSequence());
+                document.getElementById('stopBtn').addEventListener('click', () => this.stopSequence());
+                document.getElementById('testStageBtn').addEventListener('click', () => this.testStages());
+                document.getElementById('interruptBtn').addEventListener('click', () => this.interrupt());
+                document.getElementById('resetBtn').addEventListener('click', () => this.reset());
+
+                // Legacy tools
+                document.getElementById('deepFreezeBtn').addEventListener('click', () => this.deepFreeze());
+                document.getElementById('panicAudioBtn').addEventListener('click', () => this.panicAudio());
+                document.getElementById('glitchVideoBtn').addEventListener('click', () => this.glitchVideo());
+                document.getElementById('makeExcuseBtn').addEventListener('click', () => this.makeExcuse());
+
+                // Keyboard shortcuts
+                document.addEventListener('keydown', (e) => {
+                    if (e.code === 'Space' && state.isRunning) {
+                        e.preventDefault();
+                        this.interrupt();
+                    }
+                    if (e.code === 'Escape') {
+                        this.reset();
+                    }
+                });
+
+                // Canvas animation loop
+                this.animate();
+            }
+
+            getDuration() {
+                const selected = document.getElementById('durationSelect').value;
+                if (selected === 'custom') {
+                    return parseInt(document.getElementById('customDuration').value) || 120;
+                }
+                return parseInt(selected);
+            }
+
+            startSequence() {
+                if (state.isRunning) return;
+
+                const duration = this.getDuration();
+                const profile = document.getElementById('profileSelect').value;
+
+                state.isRunning = true;
+                state.startTime = Date.now();
+                state.totalDuration = duration;
+                state.targetProfile = profile;
+                state.currentStage = 0;
+
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('testStageBtn').disabled = true;
+
+                // Disable legacy tools
+                this.disableLegacyTools(true);
+
+                this.orchestrator = new FadeoutOrchestrator({
+                    duration,
+                    profile
+                });
+
+                this.orchestrator.on('tick', (data) => {
+                    state.currentStage = data.stage;
+                    state.videoQualityLevel = data.videoQuality;
+                    state.audioQualityLevel = data.audioQuality;
+                    this.updateUI(data);
+                });
+
+                this.orchestrator.on('complete', () => {
+                    this.sequenceComplete();
+                });
+
+                this.orchestrator.start();
+                this.showToast(`Sequence started: ${duration}s / ${profile}`, 'success');
+            }
+
+            stopSequence() {
+                if (!state.isRunning) return;
+
+                state.isRunning = false;
+                if (this.orchestrator) {
+                    this.orchestrator.abort();
+                }
+
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                document.getElementById('testStageBtn').disabled = false;
+                this.disableLegacyTools(false);
+
+                this.showToast('Sequence aborted', 'danger');
+                this.reset();
+            }
+
+            interrupt() {
+                if (!state.isRunning) return;
+                this.stopSequence();
+            }
+
+            testStages() {
+                if (state.isRunning) return;
+
+                // Quickly cycle through all stages
+                let stage = 0;
+                const interval = setInterval(() => {
+                    state.currentStage = stage;
+                    state.videoQualityLevel = [1.0, 0.85, 0.5, 0.2, 0][stage];
+                    state.audioQualityLevel = [1.0, 0.9, 0.6, 0.3, 0][stage];
+                    this.updateTestUI(stage);
+
+                    this.videoProcessor.update(state.videoQualityLevel);
+
+                    if (stage >= 4) {
+                        clearInterval(interval);
+                        setTimeout(() => this.reset(), 1000);
+                    }
+                    stage++;
+                }, 1000);
+            }
+
+            updateUI(data) {
+                const stageNames = ['Normal', 'Warning', 'Degraded', 'Critical', 'Poof'];
+                
+                // Update status
+                document.getElementById('currentStage').textContent = 
+                    `Stage ${data.stage} - ${stageNames[data.stage]}`;
+                
+                // Format time
+                const mins = Math.floor(data.elapsed / 60);
+                const secs = Math.floor(data.elapsed % 60);
+                document.getElementById('elapsedTime').textContent = 
+                    `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+                const remaining = Math.max(0, state.totalDuration - data.elapsed);
+                const rmins = Math.floor(remaining / 60);
+                const rsecs = Math.floor(remaining % 60);
+                document.getElementById('remainingTime').textContent = 
+                    `${String(rmins).padStart(2, '0')}:${String(rsecs).padStart(2, '0')}`;
+
+                // Video quality
+                document.getElementById('videoQuality').textContent = 
+                    `${(data.videoQuality * 100).toFixed(0)}%`;
+
+                // Progress bar
+                document.getElementById('progressFill').style.width = 
+                    `${data.progress * 100}%`;
+
+                // Stage indicators
+                const dots = document.querySelectorAll('.stage-dot');
+                dots.forEach((dot, i) => {
+                    dot.classList.remove('active', 'passed');
+                    if (i === data.stage) {
+                        dot.classList.add('active');
+                    } else if (i < data.stage) {
+                        dot.classList.add('passed');
+                    }
+                });
+
+                // Update CPU load estimate
+                const cpuEstimate = Math.min(100, 20 + (data.stage * 15));
+                if (cpuEstimate < 30) {
+                    state.cpuLoad = 'Low';
+                } else if (cpuEstimate < 60) {
+                    state.cpuLoad = 'Medium';
+                } else {
+                    state.cpuLoad = 'High';
+                }
+                document.getElementById('cpuLoad').textContent = state.cpuLoad;
+
+                // Update video processor
+                this.videoProcessor.update(data.videoQuality);
+
+                // Generate occasional packet drop sound at stage 2+
+                if (data.stage >= 2 && Math.random() > 0.95) {
+                    this.audioProcessor.generatePacketDropSound();
+                }
+            }
+
+            updateTestUI(stage) {
+                const stageNames = ['Normal', 'Warning', 'Degraded', 'Critical', 'Poof'];
+                document.getElementById('currentStage').textContent = 
+                    `Test: Stage ${stage} - ${stageNames[stage]}`;
+                
+                const dots = document.querySelectorAll('.stage-dot');
+                dots.forEach((dot, i) => {
+                    dot.classList.remove('active', 'passed');
+                    if (i === stage) {
+                        dot.classList.add('active');
+                    } else if (i < stage) {
+                        dot.classList.add('passed');
+                    }
+                });
+
+                const qualities = [1.0, 0.85, 0.5, 0.2, 0];
+                document.getElementById('videoQuality').textContent = 
+                    `${(qualities[stage] * 100).toFixed(0)}%`;
+            }
+
+            sequenceComplete() {
+                state.isRunning = false;
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                document.getElementById('testStageBtn').disabled = false;
+                this.disableLegacyTools(false);
+
+                this.showToast('Sequence complete! Meeting ended gracefully.', 'success');
+                
+                // Generate excuse mail
+                setTimeout(() => {
+                    this.generateExcuseMail();
+                }, 500);
+            }
+
+            reset() {
+                state.isRunning = false;
+                state.currentStage = 0;
+                state.videoQualityLevel = 1.0;
+                state.audioQualityLevel = 1.0;
+                state.startTime = null;
+
+                document.getElementById('currentStage').textContent = 'Stage 0 - Normal';
+                document.getElementById('elapsedTime').textContent = '00:00';
+                document.getElementById('remainingTime').textContent = '--:--';
+                document.getElementById('videoQuality').textContent = '100%';
+                document.getElementById('cpuLoad').textContent = 'Low';
+                document.getElementById('progressFill').style.width = '0%';
+
+                const dots = document.querySelectorAll('.stage-dot');
+                dots.forEach((dot, i) => {
+                    dot.classList.remove('active', 'passed');
+                    if (i === 0) dot.classList.add('active');
+                });
+
+                this.videoProcessor.update(1.0);
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+            }
+
+            disableLegacyTools(disabled) {
+                document.getElementById('deepFreezeBtn').disabled = disabled;
+                document.getElementById('panicAudioBtn').disabled = disabled;
+                document.getElementById('glitchVideoBtn').disabled = disabled;
+                document.getElementById('makeExcuseBtn').disabled = disabled;
+            }
+
+            deepFreeze() {
+                state.videoQualityLevel = 0.1;
+                this.videoProcessor.update(0.1);
+                this.showToast('Deep Freeze activated', 'danger');
+                setTimeout(() => {
+                    state.videoQualityLevel = 1.0;
+                    this.videoProcessor.update(1.0);
+                }, 3000);
+            }
+
+            panicAudio() {
+                this.audioProcessor.init();
+                if (this.audioProcessor.audioContext) {
+                    const now = this.audioProcessor.audioContext.currentTime;
+                    const osc = this.audioProcessor.audioContext.createOscillator();
+                    const gain = this.audioProcessor.audioContext.createGain();
+
+                    osc.connect(gain);
+                    gain.connect(this.audioProcessor.audioContext.destination);
+
+                    osc.frequency.setValueAtTime(200, now);
+                    osc.frequency.exponentialRampToValueAtTime(2000, now + 0.1);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0, now + 0.15);
+
+                    osc.start(now);
+                    osc.stop(now + 0.15);
+                }
+                this.showToast('Panic audio triggered', 'danger');
+            }
+
+            glitchVideo() {
+                state.videoQualityLevel = 0.3;
+                this.videoProcessor.update(0.3);
+                this.showToast('Glitch video activated', 'danger');
+                setTimeout(() => {
+                    state.videoQualityLevel = 1.0;
+                    this.videoProcessor.update(1.0);
+                }, 2000);
+            }
+
+            makeExcuse() {
+                const excuses = [
+                    "すみません、急にルーターの調子が…",
+                    "あ、電波が…接続が切れそうです",
+                    "通信が不安定になってきました",
+                    "インターネット接続が…"
+                ];
+                const excuse = excuses[Math.floor(Math.random() * excuses.length)];
+                
+                try {
+                    navigator.clipboard.writeText(excuse);
+                    this.showToast(`Copied: "${excuse}"`, 'success');
+                } catch (e) {
+                    this.showToast('Failed to copy excuse', 'danger');
+                }
+            }
+
+            generateExcuseMail() {
+                const excuses = [
+                    "申し訳ございません。先ほどの会議中にネットワーク接続が不安定になり、途中で接続が切れてしまいました。ご迷惑をおかけして申し訳ございませんでした。",
+                    "お疲れ様です。申し訳ございませんが、本日は通信環境の問題で会議から外れてしまいました。重要な情報を見落としていないか、議事録をご確認いただけますでしょうか。",
+                    "大変失礼いたしました。自宅のルーター接続が不安定で、会議に参加できなくなってしまいました。後ほど別の形式でフォローさせていただきたく存じます。"
+                ];
+                const mail = excuses[Math.floor(Math.random() * excuses.length)];
+                
+                try {
+                    navigator.clipboard.writeText(mail);
+                    this.showToast('Excuse email drafted and copied', 'success');
+                } catch (e) {
+                    this.showToast('Email draft ready', 'success');
+                }
+            }
+
+            animate() {
+                this.videoProcessor.render();
+
+                // Update audio meter
+                if (this.audioProcessor.initialized) {
+                    const freqData = this.audioProcessor.getFrequencyData();
+                    if (freqData) {
+                        const bars = document.querySelectorAll('.meter-bar');
+                        const step = Math.floor(freqData.length / bars.length);
+                        bars.forEach((bar, i) => {
+                            const value = freqData[i * step] || 0;
+                            bar.style.height = `${(value / 255) * 100}%`;
+                        });
+                    }
+                }
+
+                this.animationId = requestAnimationFrame(() => this.animate());
+            }
+
+            showToast(message, type = 'success') {
+                const toast = document.createElement('div');
+                toast.className = `toast ${type}`;
+                toast.textContent = message;
+                document.body.appendChild(toast);
+
+                setTimeout(() => {
+                    toast.classList.add('fadeout');
+                    setTimeout(() => toast.remove(), 300);
+                }, 3000);
+            }
         }
 
-        function saveSettings() {
-            STATE.debugMode = document.getElementById('debugMode').checked;
-            console.log('[Settings] Saved. Debug mode:', STATE.debugMode);
-            closeSettings();
-        }
+        // ============================================================================
+        // INITIALIZATION
+        // ============================================================================
 
-        // Request notification permission
-        if ('Notification' in window && Notification.permission === 'default') {
-            Notification.requestPermission();
-        }
+        let uiManager = null;
 
-        // ===== START =====
-        window.addEventListener('load', initialize);
-        console.log('=== Phase 2: Ghost Twin & Name Summon - Loaded ===');
+        document.addEventListener('DOMContentLoaded', () => {
+            uiManager = new UIManager();
+            console.log('Ghost-in-the-Zoom Phase 3: Graceful Fadeout Orchestrator initialized');
+        });

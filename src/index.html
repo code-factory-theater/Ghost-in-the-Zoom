@@ -3,139 +3,216 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Phase 2: Ghost Twin & Name Summon - スマート影武者システム</title>
+    <title>Ghost-in-the-Zoom / Phase 3 - Graceful Fadeout Orchestrator</title>
       <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <div class="container">
-        <!-- ===== HEADER ===== -->
         <div class="header">
-            <h1>👻 Ghost Twin & Name Summon - Phase 2</h1>
-            <div class="header-controls">
-                <div class="status-badge">
-                    <div class="status-dot inactive" id="systemStatusDot"></div>
-                    <span id="systemStatus">Ready</span>
-                </div>
-            </div>
+            <h1>👻 Ghost-in-the-Zoom / Phase 3</h1>
+            <p>Graceful Fadeout Orchestrator — 段階的自然消滅シーケンサー</p>
         </div>
 
-        <!-- ===== MAIN CONTENT ===== -->
-        <div class="main-content">
-            <!-- VIDEO SECTION -->
-            <div class="video-section">
-                <div class="video-container">
-                    <video id="video" playsinline autoplay muted></video>
-                    <canvas id="ghostCanvas"></canvas>
-                    <div class="video-overlay">
-                        <div class="ghost-indicator" id="ghostIndicator">
-                            <div class="ghost-dot"></div>
-                            <span>影武者稼働中...</span>
-                        </div>
-                        <div class="alert-overlay" id="alertOverlay">
-                            <div class="alert-text" id="alertText">🚨 CALLING!</div>
-                        </div>
+        <div class="content">
+            <!-- Section 1: Quick Start -->
+            <div class="section">
+                <div class="section-title">
+                    <span class="icon">⚡</span>
+                    <span>クイックスタート</span>
+                </div>
+                <div class="info-box">
+                    ワンクリックで3〜5分かけて段階的に回線障害をエスカレート。周囲に「電波不良の限界」を自然に確信させて美しくフェードアウト。
+                </div>
+                <div class="controls-grid">
+                    <div class="control-group">
+                        <label class="control-label">⏱️ 実行時間</label>
+                        <select id="durationSelect">
+                            <option value="60">1 分 (Quick Test)</option>
+                            <option value="180" selected>3 分 (Standard)</option>
+                            <option value="300">5 分 (Cinematic)</option>
+                            <option value="custom">カスタム</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label class="control-label">🎯 動作プロファイル</label>
+                        <select id="profileSelect">
+                            <option value="SlowDeath" selected>SlowDeath (徐々に悪化)</option>
+                            <option value="SurgeDrop">SurgeDrop (急激に落下)</option>
+                            <option value="GhostLoop">GhostLoop (ループ状態)</option>
+                        </select>
                     </div>
                 </div>
-                <div class="video-controls">
-                    <button class="btn btn-primary" id="toggleGhost">🎭 影武者ON</button>
-                    <button class="btn" id="manualReturn">↩️ 実写復帰</button>
-                    <button class="btn" id="openSettings">⚙️ 設定</button>
-                    <button class="btn btn-danger" id="emergencyStop">🛑 緊急停止</button>
+                <div id="customDurationGroup" style="display:none; margin-bottom: 15px;">
+                    <div class="control-group">
+                        <label class="control-label">カスタム時間 (秒)</label>
+                        <input type="number" id="customDuration" min="10" max="600" value="120">
+                    </div>
+                </div>
+                <div class="button-grid">
+                    <button class="btn-primary" id="startBtn">▶️ START SEQUENCE</button>
+                    <button class="btn-success" id="testStageBtn">🧪 Test Stages</button>
+                    <button class="btn-danger" id="stopBtn" disabled>⏹️ ABORT NOW</button>
+                </div>
+            </div>
+
+            <!-- Section 2: Live Preview -->
+            <div class="section">
+                <div class="section-title">
+                    <span class="icon">📹</span>
+                    <span>映像シミュレーション</span>
+                </div>
+                <div class="preview-area">
+                    <canvas id="simulationCanvas" width="400" height="300"></canvas>
+                    <div class="preview-label">
+                        リアルタイムでステージの映像劣化を表示しています
+                    </div>
                 </div>
             </div>
 
-            <!-- CONTROL PANEL -->
-            <div class="control-panel">
-                <!-- Ghost Twin Section -->
-                <div class="panel-section">
-                    <div class="panel-title">📸 影武者ループ</div>
-                    <div class="toggle-group">
-                        <span class="toggle-label">ループ稼働</span>
-                        <div class="switch" id="ghostSwitch">
-                            <div class="switch-thumb"></div>
-                        </div>
-                    </div>
-                    <div class="status-text" id="ghostStatus">
-                        ⏹ 停止中 | ループ品質: 高
-                    </div>
+            <!-- Section 3: Current Status -->
+            <div class="section">
+                <div class="section-title">
+                    <span class="icon">📊</span>
+                    <span>実行ステータス</span>
                 </div>
-
-                <!-- Name Summon Section -->
-                <div class="panel-section">
-                    <div class="panel-title">🎤 名指し検知</div>
-                    <div class="toggle-group">
-                        <span class="toggle-label">音声認識</span>
-                        <div class="switch" id="audioSwitch">
-                            <div class="switch-thumb"></div>
-                        </div>
+                <div class="status-container">
+                    <div class="status-row">
+                        <span class="status-label">現在ステージ:</span>
+                        <span class="status-value" id="currentStage">Stage 0 - Normal</span>
                     </div>
-                    <div class="status-text" id="audioStatus">
-                        ⏹ 停止中 | マイク: ✓
+                    <div class="status-row">
+                        <span class="status-label">進行時間:</span>
+                        <span class="status-value" id="elapsedTime">00:00</span>
                     </div>
-                </div>
-
-                <!-- Trigger Words Section -->
-                <div class="panel-section">
-                    <div class="panel-title">🔔 トリガーワード</div>
-                    <div class="trigger-words-list" id="triggerWordsList">
-                        <!-- Dynamically populated -->
+                    <div class="status-row">
+                        <span class="status-label">残り時間:</span>
+                        <span class="status-value" id="remainingTime">--:--</span>
                     </div>
-                    <div class="input-group">
-                        <input type="text" id="newTriggerInput" placeholder="新規ワード入力...">
-                        <button class="btn" id="addTriggerBtn">+</button>
+                    <div class="status-row">
+                        <span class="status-label">映像品質:</span>
+                        <span class="status-value" id="videoQuality">100%</span>
                     </div>
-                </div>
-
-                <!-- Auto Return Section -->
-                <div class="panel-section">
-                    <div class="panel-title">⚡ 自動復帰</div>
-                    <div class="toggle-group">
-                        <span class="toggle-label">トリガーで復帰</span>
-                        <div class="switch" id="autoReturnSwitch">
-                            <div class="switch-thumb"></div>
-                        </div>
+                    <div class="status-row">
+                        <span class="status-label">CPU負荷:</span>
+                        <span class="status-value" id="cpuLoad">Low</span>
                     </div>
-                    <div class="toggle-group">
-                        <span class="toggle-label">定型音声再生</span>
-                        <div class="switch" id="voiceLineSwitch">
-                            <div class="switch-thumb"></div>
-                        </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
                     </div>
-                    <div class="status-text" id="autoReturnStatus">
-                        手動復帰モード
-                    </div>
-                </div>
-
-                <!-- Performance Section -->
-                <div class="panel-section">
-                    <div class="panel-title">📊 パフォーマンス</div>
-                    <div class="status-text">
-                        FPS: <span id="fpsCounter">30</span> | 
-                        Memory: <span id="memoryCounter">0</span>MB
+                    <div class="stage-indicator" id="stageIndicator">
+                        <div class="stage-dot active">0</div>
+                        <div class="stage-dot">1</div>
+                        <div class="stage-dot">2</div>
+                        <div class="stage-dot">3</div>
+                        <div class="stage-dot">4</div>
                     </div>
                 </div>
             </div>
+
+            <!-- Section 4: Stage Timeline -->
+            <div class="section">
+                <div class="section-title">
+                    <span class="icon">🎬</span>
+                    <span>ステージタイムライン</span>
+                </div>
+                <table class="stage-table">
+                    <thead>
+                        <tr>
+                            <th>ステージ</th>
+                            <th>時間帯</th>
+                            <th>映像</th>
+                            <th>音声</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="stage-name">Stage 0: Normal</span></td>
+                            <td>0:00</td>
+                            <td>通常</td>
+                            <td>クリア</td>
+                        </tr>
+                        <tr>
+                            <td><span class="stage-name">Stage 1: Warning</span></td>
+                            <td>～1:00</td>
+                            <td>微細ノイズ＆FPS低下</td>
+                            <td>パチッ音</td>
+                        </tr>
+                        <tr>
+                            <td><span class="stage-name">Stage 2: Degraded</span></td>
+                            <td>～2:00</td>
+                            <td>ガクガク3-5fps</td>
+                            <td>ロボット化</td>
+                        </tr>
+                        <tr>
+                            <td><span class="stage-name">Stage 3: Critical</span></td>
+                            <td>～2:45</td>
+                            <td>完全静止 (Freeze)</td>
+                            <td>ディレイ継続</td>
+                        </tr>
+                        <tr>
+                            <td><span class="stage-name">Stage 4: Poof</span></td>
+                            <td>3:00</td>
+                            <td>ブラックアウト</td>
+                            <td>切断</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Section 5: Individual Tools (Legacy) -->
+            <div class="section">
+                <div class="section-title">
+                    <span class="icon">🛠️</span>
+                    <span>レガシーツール（個別実行）</span>
+                </div>
+                <div class="info-box warning">
+                    オーケストレータが動作している場合、これらのボタンは無効になります。
+                </div>
+                <div class="button-grid">
+                    <button class="btn-secondary" id="deepFreezeBtn">❄️ Deep Freeze</button>
+                    <button class="btn-danger" id="panicAudioBtn">🔊 Panic Audio</button>
+                    <button class="btn-secondary" id="glitchVideoBtn">📟 Glitch Video</button>
+                    <button class="btn-secondary" id="makeExcuseBtn">💬 Make Excuse</button>
+                </div>
+            </div>
+
+            <!-- Section 6: Audio Analysis -->
+            <div class="section">
+                <div class="section-title">
+                    <span class="icon">🎵</span>
+                    <span>オーディオレベルメーター</span>
+                </div>
+                <div class="audio-meter" id="audioMeter">
+                    <div class="meter-bar"></div>
+                    <div class="meter-bar"></div>
+                    <div class="meter-bar"></div>
+                    <div class="meter-bar"></div>
+                    <div class="meter-bar"></div>
+                    <div class="meter-bar"></div>
+                    <div class="meter-bar"></div>
+                    <div class="meter-bar"></div>
+                </div>
+            </div>
+
+            <!-- Section 7: Emergency Controls -->
+            <div class="section">
+                <div class="section-title">
+                    <span class="icon">🚨</span>
+                    <span>緊急制御</span>
+                </div>
+                <div class="info-box danger">
+                    シーケンス実行中に Space キーまたはクリックで即座に中止可能。ESC 連打で強制脱出。
+                </div>
+                <div class="button-grid">
+                    <button class="btn-danger" id="interruptBtn">🛑 Interrupt Now (Space)</button>
+                    <button class="btn-secondary" id="resetBtn">🔄 Reset All</button>
+                </div>
+            </div>
+
         </div>
-    </div>
 
-    <!-- SETTINGS MODAL -->
-    <div class="modal" id="settingsModal">
-        <div class="modal-content">
-            <div class="modal-title">⚙️ 詳細設定</div>
-            <div class="modal-body">
-                <label style="color: #aaa; font-size: 12px;">
-                    <input type="checkbox" id="debugMode" style="margin-right: 8px;">
-                    デバッグモード
-                </label>
-                <label style="color: #aaa; font-size: 12px;">
-                    <input type="checkbox" id="advancedLogging" style="margin-right: 8px;">
-                    詳細ログ出力
-                </label>
-            </div>
-            <div class="modal-footer">
-                <button class="btn" onclick="closeSettings()">キャンセル</button>
-                <button class="btn btn-primary" onclick="saveSettings()">保存</button>
-            </div>
+        <div class="footer">
+            <p>Phase 3 Graceful Fadeout Orchestrator v1.0.0 | Built with Pure JavaScript | Non-destructive architecture</p>
         </div>
     </div>
 
